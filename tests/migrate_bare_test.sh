@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Tests for scripts/migrate_to_bare.sh.  Run: bash tests/migrate_bare_test.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+M=$SCRIPTS/migrate_to_bare.sh
+
+# Puts a `git` shim first on PATH that fails once on the given argument sequence.
+shim_fail_once() {
+  mkdir -p "$WORK/shim"
+  rm -f "$WORK/shim/fired"
+  cat >"$WORK/shim/git" <<EOF
+#!/usr/bin/env bash
+if [[ " \$* " == *" $1 "* && ! -e $WORK/shim/fired ]]; then
+  touch $WORK/shim/fired; echo "shim: forced failure of '$1'" >&2; exit 1
+fi
+exec $REAL_GIT "\$@"
+EOF
+  chmod +x "$WORK/shim/git"
+}
+
+section "dry run"
+repo=$(make_repo dry)
+before=$(tree_of "$repo")
+plan=$(cd "$repo" && bash "$M"); rc=$?
+check_eq "dry run exits 0" "$rc" 0
+check_eq "dry run is eligible" "$(json_get '["eligible"]' <<<"$plan")" True
+check_eq "dry run targets <repo>/main" "$(json_get '["after"]["source_worktree"]' <<<"$plan")" "$repo/main"
+check_eq "dry run changes nothing" "$(tree_of "$repo")" "$before"
+
+section "convert a dirty checkout (staged, unstaged, untracked, ignored, top-level main/)"
+repo=$(make_repo dirty)
+(cd "$repo"
+ echo stashed >>a.txt && git stash -q
+ echo staged >>a.txt && git add a.txt && echo unstaged >>a.txt
+ echo new >new.txt && echo SECRET=1 >.env && mkdir -p main && echo x >main/x.txt)
+state=$(state_of "$repo")
+reflog=$(git -C "$repo" reflog | wc -l)
+stash=$(git -C "$repo" stash list | wc -l)
+out=$(cd "$repo/main" && bash "$M" --apply); rc=$?
+check_eq "apply exits 0 (run from a subdirectory)" "$rc" 0
+check_eq "result reports migrated" "$(json_get '["migrated"]' <<<"$out")" True
+check ".bare is a bare repo" test "$(git --git-dir="$repo/.bare" config --bool core.bare)" = true
+check_eq ".git is a gitfile" "$(cat "$repo/.git")" "gitdir: ./.bare"
+check_eq "only .bare, .git and main/ at the root" "$(ls -A "$repo" | tr '\n' ' ')" ".bare .git main "
+check_eq "status, staged and unstaged changes preserved" "$(state_of "$repo/main")" "$state"
+check "ignored .env moved along" test -f "$repo/main/.env"
+check "top-level main/ dir of the project kept" test -f "$repo/main/main/x.txt"
+check_eq "HEAD reflog preserved" "$(git -C "$repo/main" reflog | wc -l)" "$reflog"
+check_eq "stash preserved" "$(git -C "$repo/main" stash list | wc -l)" "$stash"
+check "git works from the container root" git -C "$repo" rev-parse --git-common-dir
+check_eq "worktree.sh sees the bare layout" \
+  "$(cd "$repo" && bash "$SCRIPTS/worktree.sh" config | json_get '["layout"]')" bare
+check_eq "worktree.sh source_worktree = main/" \
+  "$(cd "$repo" && bash "$SCRIPTS/worktree.sh" config | json_get '["source_worktree"]')" "$repo/main"
+
+section "blockers (nothing changes, exit 1)"
+plan=$(cd "$repo" && bash "$M"); rc=$?
+check_eq "already bare: exit 1" "$rc" 1
+check "already bare: reason given" grep -q 'already a bare-repo' <<<"$plan"
+
+blocked() {  # blocked <name> <pattern> <setup command...>
+  local name=$1 pattern=$2 r before out rc
+  shift 2
+  r=$(make_repo "blk-$name")
+  (cd "$r" && "$@") >/dev/null 2>&1
+  before=$(tree_of "$r")
+  out=$(cd "$r" && bash "$M" --apply 2>&1); rc=$?
+  check_eq "$name: exit 1" "$rc" 1
+  if grep -q -- "$pattern" <<<"$out"; then pass "$name: reason given"; else fail "$name: reason given ($out)"; fi
+  check_eq "$name: untouched" "$(tree_of "$r")" "$before"
+}
+blocked submodule "submodules" touch .gitmodules
+blocked detached "detached" git checkout -q --detach
+blocked non-default "not the default branch" git switch -qc feature
+blocked merge "merge is in progress" bash -c 'git switch -qc other HEAD~1 && echo x >a.txt && git commit -qam x &&
+  git switch -q main && git merge -q other'
+blocked index-lock "index.lock" touch .git/index.lock
+blocked tmp-exists "already exists" mkdir .sar-migrate-tmp
+blocked sar-leftover "earlier SAR run" git worktree add -q -b sar/old ../sar-old
+
+section "linked worktrees inside and outside the repo are reconnected"
+repo=$(make_repo linked)
+git -C "$repo" worktree add -q -b in "$repo/.claude/worktrees/in"
+git -C "$repo" worktree add -q -b out "$WORK/linked-out"
+(cd "$repo" && bash "$M" --apply >/dev/null 2>&1); rc=$?
+check_eq "apply exits 0" "$rc" 0
+check_eq "nested worktree works at its new path" \
+  "$(git -C "$repo/main/.claude/worktrees/in" rev-parse --path-format=absolute --git-common-dir)" "$repo/.bare"
+check_eq "outside worktree works" \
+  "$(git -C "$WORK/linked-out" rev-parse --path-format=absolute --git-common-dir)" "$repo/.bare"
+check "no prunable worktree entries" bash -c "! git -C '$repo/main' worktree list --porcelain | grep -q '^prunable'"
+
+section "rollback restores the original repository"
+for step in "worktree add" "worktree repair"; do
+  repo=$(make_repo "rb-${step// /-}")
+  git -C "$repo" worktree add -q -b out "$WORK/rb-${step// /-}-out"
+  (cd "$repo" && echo dirty >>a.txt && git add a.txt && echo more >>a.txt && echo u >u.txt)
+  state=$(state_of "$repo") before=$(tree_of "$repo")
+  shim_fail_once "$step"
+  out=$(cd "$repo" && PATH="$WORK/shim:$PATH" bash "$M" --apply 2>&1); rc=$?
+  check_eq "failing '$step': exit 2" "$rc" 2
+  check "failing '$step': reports restore" grep -q 'back to its original state' <<<"$out"
+  check_eq "failing '$step': files and .git restored" "$(tree_of "$repo")" "$before"
+  check_eq "failing '$step': changes restored" "$(state_of "$repo")" "$state"
+  check "failing '$step': linked worktree still works" git -C "$WORK/rb-${step// /-}-out" status
+done
+
+section "skill files mention no specific project"
+project=nex; project+=us   # split so this file does not match itself
+if grep -rqi "$project" "$SKILL_DIR"; then fail "no project name in skill files"; else pass "no project name in skill files"; fi
+
+finish
