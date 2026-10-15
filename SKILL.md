@@ -85,10 +85,22 @@ If you are not running as the Lead model, tell the user how to switch; do not si
   memory that those docs do not cover, plus any `worker_notes`. Workers cannot see your
   context or memory, so anything left out is unknown to them. Write DoD commands the way
   those rules require (working directory, flags, tools).
-- Save each spec and its whitelist to a scratch/temp directory (never inside a worktree).
-- **Show the gap report, specs, and execution plan to the user and wait for approval**
-  before step 3. In `staged` mode the approval must explicitly cover the inter-stage local
-  commits and merges (no push).
+- Save the gap report, the execution plan, each spec, and each whitelist to a scratch/temp
+  directory (never inside a worktree): `gap-report.md`, `plan.md`, `spec-<slug>.md`, `<slug>.wl`.
+- **Overlap check** — per stage: `bash SKILL_DIR/scripts/check_scope.sh --overlap
+  <source_worktree> <slug>.wl...`. An `OVERLAP` means re-split or re-stage; check every
+  `POSSIBLE` by hand.
+- **DoD dry run** — run each DoD command of `independent` / stage-1 tasks in
+  `source_worktree`, classify it, and note the class in the spec; fix `BROKEN` commands.
+  Stage 2+ tasks are dry-run at step 3. See
+  [worker-spec-template.md](references/worker-spec-template.md#dod-dry-run).
+- **Plan Critic** — with 2+ tasks, `staged` mode, an H-risk task, or on request: dispatch a
+  read-only critic and decide on each finding per
+  [references/plan-critic.md](references/plan-critic.md). One round.
+- **Show the checkpoint report to the user and wait for approval** before step 3: decision
+  matrix, decisions for you, execution plan, then gap report and specs, in the format of
+  [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report). In `staged` mode
+  the approval must explicitly cover the inter-stage local commits and merges (no push).
 
 Steps 3–5 run **once per stage** (`independent` mode = a single stage), in plan order.
 
@@ -99,7 +111,8 @@ Steps 3–5 run **once per stage** (`independent` mode = a single stage), in pla
    the repo (config → existing worktree layout → bare → standard); see the script header.
    Branch is `sar/<slug>`; the fork point is recorded for later diffs. Files listed under
    `provision` (gitignored secrets, venvs) are copied/linked in; check `provisioned` in the
-   output and stop if an expected entry is missing.
+   output and stop if an expected entry is missing. Stage 2+: dry-run each task's DoD in its
+   new worktree before dispatch (path/flag fixes only; anything else goes back to the user).
 2. Insert the worktree path and base into each spec, then dispatch **all of the stage's
    Workers in parallel** per [references/dispatch.md](references/dispatch.md) using the
    Worker model/effort (concurrency cap = `max_parallel`).
@@ -137,11 +150,12 @@ Tasks loop independently of each other.
 | `scripts/detect_runtime.sh [--agent X]` | Ecosystem + model JSON | 0 ok, 2 usage |
 | `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sar-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
 | `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
+| `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
 | `scripts/migrate_to_bare.sh [--apply]` | Plan (default) or perform the in-place conversion to the bare-repo worktree layout; see [references/bare-layout.md](references/bare-layout.md) | 0 ok, 1 blocked, 2 failed + rolled back, 3 rollback incomplete |
 | `scripts/wt.sh add\|remove\|list\|status` | For people, not the Lead: everyday branch worktrees in the bare layout | 0 ok, 1 dirty/missing (`status --check`), 2 error |
 
 Script tests (throwaway repos in a temp dir only): `bash SKILL_DIR/tests/migrate_bare_test.sh`,
-`bash SKILL_DIR/tests/worktree_test.sh`.
+`bash SKILL_DIR/tests/worktree_test.sh`, `bash SKILL_DIR/tests/check_scope_test.sh`.
 
 ## Worktree layout
 Detected automatically; nothing to configure per repo. A standard repo can be converted to

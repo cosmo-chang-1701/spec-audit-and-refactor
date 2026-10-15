@@ -61,11 +61,14 @@ write, or run commands in any worktree but your own.
 2. <...>
 
 ## Definition of Done
-Every command must exit 0 when run from the worktree root:
+Every command must exit 0 when run from the worktree root. The `# baseline:` note is how
+each command behaved on your base before any change: `FAIL-EXPECTED` commands fail because
+of the problem you are fixing — make them pass; `PASS` commands already pass — keep them
+passing; `NOT-YET` commands need files you will add.
 
-    <test command, e.g. pytest tests/payments -q>
-    <lint command, e.g. ruff check src/payments tests/payments>
-    <type check / build, if applicable>
+    <test command, e.g. pytest tests/payments -q>        # baseline: FAIL-EXPECTED (test_duplicate_charge)
+    <lint command, e.g. ruff check src/payments tests/payments>   # baseline: PASS
+    <type check / build, if applicable>                  # baseline: <...>
 
 Plus these behavioural criteria:
 - <e.g. "duplicate charge path at src/payments/charge.py:88 is unreachable; covered by a test">
@@ -80,12 +83,40 @@ and the reason instead of editing it.
 3. Anything skipped, assumed, or left for follow-up.
 ```
 
+## DoD dry run
+Before the checkpoint, the Lead runs every DoD command once on the code the Worker will start
+from, so a broken or unreachable DoD never reaches a Worker:
+- `independent` mode and stage 1: in `source_worktree` (where step 1 ran the tests);
+- stage 2+: in the task's worktree right after `worktree.sh create`, before dispatch — its
+  base `sar-stage/<n-1>` does not exist at the checkpoint.
+
+Classify each command and write the class into the spec as `# baseline: <class>`:
+
+| Class | Meaning | Action |
+| :--- | :--- | :--- |
+| `PASS` | Already exits 0 | Keep (regression guard). A behaviour-change task needs at least one command that is not `PASS` — otherwise the DoD cannot tell fixed from unfixed. |
+| `FAIL-EXPECTED` | Fails because of the finding this task fixes | Ideal. Note the failing test or message. |
+| `NOT-YET` | Needs a file the Worker will add (e.g. a new test file) | Prove the runner works instead: `pytest --collect-only tests/payments`, `command -v <tool>`. |
+| `BROKEN` | Command not found, wrong flags or working directory, missing tool or env | Fix the command before the checkpoint. |
+| `FAIL-UNRELATED` | Fails for a reason outside this task (pre-existing failure, flaky test, missing service) | The Worker cannot reach it within the whitelist. Narrow the command, split off the failure as its own finding, or list it under "Decisions for you". |
+
+Afterwards re-run the step 0 baseline command on `source_worktree`. If it changed, a DoD
+command writes files that are not gitignored — stop and report; the same files would fail
+the Worker's scope gate.
+
+In stage 2+ a fix that only changes how a command is invoked (path, flag, working directory)
+and not what it checks may be applied without new approval; say so in the dispatch summary.
+Any other change to a DoD needs the user's approval.
+
 ## Lead checklist before dispatching
 - [ ] Slug is kebab-case and matches the worktree branch.
 - [ ] Whitelist is the minimum set; tests are included.
 - [ ] Every DoD item is a runnable command or an objectively checkable statement, and
       follows the Repo rules (working directory, flags, allowed tools).
+- [ ] Every DoD command was dry-run and carries a `# baseline:` class; none is `BROKEN`,
+      and every `FAIL-UNRELATED` was resolved or approved by the user.
 - [ ] Repo rules cover the repo's agent docs, relevant pitfalls, and every `worker_notes` entry.
 - [ ] The task is in the execution plan; its stage, dependencies, and base ref match it,
-      and its whitelist does not overlap any other task in the same stage.
+      and its whitelist does not overlap any other task in the same stage
+      (`check_scope.sh --overlap` shows no `OVERLAP`; every `POSSIBLE` was checked).
 - [ ] The user has approved this spec (Phase 2 checkpoint).

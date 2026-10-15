@@ -61,7 +61,7 @@ Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 
 ```mermaid
 flowchart LR
     A[0. 前置檢查] --> B[1. 稽核<br/>唯讀]
-    B --> C[2. Spec<br/>使用者核准]
+    B --> C[2. Spec<br/>預檢 + Critic<br/>使用者核准]
     C --> D[3. Worktree<br/>+ 派工]
     D --> E[4. 檢查<br/>範圍 + DoD]
     E --> F[5. 審查<br/>最多 3 輪]
@@ -74,8 +74,10 @@ flowchart LR
 2. **稽核**：掃描議定的範圍，執行既有的 lint / test / type-check 指令，撰寫缺口報告，並將發現
    分組為白名單小且互不重疊的任務。
 3. **Spec**：為每個任務填寫 [spec 範本](references/worker-spec-template.md)，並擬定
-   [執行計畫](references/execution-plan.md)（`independent` 或 `staged`）。
-   **使用者核准前不會派出任何 Worker。**
+   [執行計畫](references/execution-plan.md)（`independent` 或 `staged`）。接著檢查白名單是否
+   重疊、預先執行每條 DoD 指令以找出無效或無法達成的指令；任務較多或風險較高時，再由唯讀的
+   [Plan Critic](references/plan-critic.md) 挑戰 spec。呈報時先給使用者決策矩陣（各任務的範圍、
+   風險與共用資源），再附完整 spec。**使用者核准前不會派出任何 Worker。**
 4. **Worktree + 派工**：為每個任務在 `sar/<slug>` 分支上建立 worktree，並平行派出該階段的
    Worker（詳見 [dispatch.md](references/dispatch.md)）。
 5. **檢查**：執行 `check_scope.sh`，再重新執行所有 DoD 指令，全部都必須通過。
@@ -177,7 +179,7 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 | :--- | :--- |
 | [`detect_runtime.sh`](scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 Lead / Worker 模型 |
 | [`worktree.sh`](scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision` |
-| [`check_scope.sh`](scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗 |
+| [`check_scope.sh`](scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
 | [`wt.sh`](scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead |
 
@@ -198,7 +200,8 @@ tests/auth/          # 結尾的 / 代表整個目錄
 ├── references/
 │   ├── bare-layout.md           # bare-repo 佈局與轉換提問的格式
 │   ├── dispatch.md              # 各執行環境的 Worker 派工方式
-│   ├── execution-plan.md        # 相依性分析，independent 與 staged 模式
+│   ├── execution-plan.md        # 相依性分析、執行模式與 checkpoint 呈報格式
+│   ├── plan-critic.md           # 對 spec 的唯讀對抗式審查
 │   ├── review-checklist.md      # diff 審查與判定格式
 │   └── worker-spec-template.md  # 交給每個 Worker 的 spec 範本
 ├── scripts/                     # Bash 輔助腳本（見上方）
@@ -212,6 +215,7 @@ tests/auth/          # 結尾的 / 代表整個目錄
 ```bash
 bash tests/worktree_test.sh
 bash tests/migrate_bare_test.sh
+bash tests/check_scope_test.sh
 ```
 
 ## 貢獻
@@ -219,7 +223,7 @@ bash tests/migrate_bare_test.sh
 歡迎提交 issue 與 pull request。提交前請注意：
 
 1. 腳本維持使用 Bash 並加上 `set -euo pipefail`，與現有風格一致。
-2. 修改任何腳本時，請在 `tests/` 新增或更新測試，並確認兩組測試都通過。
+2. 修改任何腳本時，請在 `tests/` 新增或更新測試，並確認所有測試都通過。
 3. 讓 `SKILL.md` 與 `references/` 下的檔案和腳本行為保持一致。
 
 ## 授權條款

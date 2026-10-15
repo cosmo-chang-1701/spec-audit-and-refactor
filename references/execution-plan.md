@@ -2,7 +2,7 @@
 
 When the audit yields more than one task, the Lead decides how Workers run before the
 spec checkpoint: **independent** (all in parallel at once) or **staged** (parallel within a
-stage, stages in order). The plan is shown to the user together with the gap report and specs.
+stage, stages in order). The plan is shown to the user in the checkpoint report (§3).
 
 ## 1. Dependency analysis
 Task B **depends on** task A when any of these hold:
@@ -10,6 +10,8 @@ Task B **depends on** task A when any of these hold:
 - B's DoD can only pass once A's change exists.
 - B's whitelist overlaps A's — including shared hot spots such as route/registry/index
   files, lockfiles, migrations, or a common test fixture. Overlapping tasks never share a stage.
+  `check_scope.sh --overlap <source_worktree> <a>.wl <b>.wl ...` lists shared tracked files
+  (`OVERLAP`) and patterns that could meet on a new file (`POSSIBLE`).
 
 Cycles mean the split is wrong: merge the tasks in the cycle into one task.
 Prefer a split that removes edges (e.g. one task owns the shared file) over a longer chain.
@@ -24,7 +26,38 @@ Concurrency cap: at most `max_parallel` (from `worktree.sh config`, default **4*
 running at once unless the user sets another limit;
 split a larger stage (or wave) into batches.
 
-## 3. Plan format (shown at the checkpoint)
+## 3. Checkpoint report
+Lead the report with what needs a human decision; put the detail last. Always in this order
+(a single task gets a one-row matrix and no plan block):
+
+**① Decision matrix** — one row per task:
+
+| Task | Findings | Scope | Stage ← deps | Risk | Shared resources | DoD baseline | Critic |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| fix-auth-token | #1, #4 | `src/auth/` · 6 files | 1 | H — auth | — | 1 FAIL-EXPECTED · 2 PASS | 1 accepted |
+| add-rate-limit | #2 | `src/api/middleware/` · 3 files | 1 | M | Redis (compose) | 1 NOT-YET · 2 PASS | — |
+| migrate-callers | #3 | `src/api/routes/` · 11 files | 2 ← fix-auth-token | M | `routes/index.py` POSSIBLE | 2 PASS · 1 FAIL-EXPECTED | 1 rejected (H) |
+
+- **Scope**: top directories of the whitelist and the file count from
+  `check_scope.sh --list <source_worktree> <slug>.wl`.
+- **Risk** — the highest that applies:
+  - **H**: touches auth/security, a public API, a DB migration, or data deletion; or the
+    changed code has no existing tests;
+  - **M**: crosses modules, or changes behaviour that existing tests cover;
+  - **L**: local, behaviour-preserving, covered by tests.
+- **Shared resources**:
+  - static: `OVERLAP` / `POSSIBLE` lines from `check_scope.sh --overlap`, lockfiles,
+    migrations, common fixtures;
+  - runtime, for tasks in the same stage: Docker Compose volumes and networks (shared across
+    worktrees, see the spec template's Repo rules), databases, ports, the linked `.venv`.
+- **DoD baseline**: class counts from the [DoD dry run](worker-spec-template.md#dod-dry-run).
+- **Critic**: accepted/rejected counts, or `skipped` ([plan-critic.md](plan-critic.md)).
+
+**② Decisions for you** — one bullet each, empty section if none: every H-risk task, every
+rejected H Critic finding (with the reason), every `FAIL-UNRELATED` DoD, every whitelist
+that reaches beyond the files the findings name, and every unresolved `POSSIBLE` overlap.
+
+**③ Execution plan**:
 ```text
 Mode: staged · max parallel 4
 Stage 1 (base origin/main 1a2b3c4): fix-auth-token, add-rate-limit       [parallel]
@@ -32,6 +65,9 @@ Stage 2 (base sar-stage/1):  migrate-callers ← fix-auth-token
 Stage 3 (base sar-stage/2):  drop-legacy-auth ← migrate-callers
 Inter-stage: local commits on sar/* and sar-stage/* branches, merges via worktree.sh integrate; no push
 ```
+
+**④ Gap report and full specs**, with the scratch path of each spec file.
+
 For `staged`, explicitly ask the user to approve the inter-stage local commits and merges.
 That approval covers only those local operations; push and PR creation still need their own
 consent at close-out.
@@ -41,6 +77,8 @@ consent at close-out.
 
 1. **Create** — `worktree.sh create <slug> --base <stage base>` for each task in the stage
    (stage 1: `default_base`, i.e. omit `--base`; stage *n*: `sar-stage/<n-1>`).
+   Stage 2+: dry-run each task's DoD in its new worktree and update the `# baseline:` notes
+   per [worker-spec-template.md](worker-spec-template.md#dod-dry-run) before dispatching.
 2. **Dispatch** — all Workers of the stage at once, per [dispatch.md](dispatch.md).
 3. **Gate + review per task** — `check_scope.sh`, re-run its DoD, review per
    [review-checklist.md](review-checklist.md). Tasks loop independently (max 3 rounds each);

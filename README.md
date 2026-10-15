@@ -64,7 +64,7 @@ verifies it again at close-out.
 ```mermaid
 flowchart LR
     A[0. Preflight] --> B[1. Audit<br/>read-only]
-    B --> C[2. Spec<br/>user approval]
+    B --> C[2. Spec<br/>dry run + critic<br/>user approval]
     C --> D[3. Worktree<br/>+ dispatch]
     D --> E[4. Gate<br/>scope + DoD]
     E --> F[5. Review<br/>≤ 3 rounds]
@@ -78,8 +78,11 @@ flowchart LR
 2. **Audit** — scan the agreed scope, run existing lint/test/type-check commands, write a
    gap report, and group findings into tasks with small, non-overlapping whitelists.
 3. **Spec** — fill a [spec template](references/worker-spec-template.md) per task and an
-   [execution plan](references/execution-plan.md) (`independent` or `staged`).
-   **Nothing is dispatched until the user approves.**
+   [execution plan](references/execution-plan.md) (`independent` or `staged`). Check
+   whitelists for overlap, dry-run every DoD command to catch broken or unreachable ones, and
+   for larger or riskier plans have a read-only [Plan Critic](references/plan-critic.md)
+   challenge the specs. The user gets a decision matrix (scope, risk, shared resources per
+   task) ahead of the full specs. **Nothing is dispatched until the user approves.**
 4. **Worktree + dispatch** — create one worktree per task on branch `sar/<slug>` and
    dispatch the stage's Workers in parallel (see [dispatch.md](references/dispatch.md)).
 5. **Gate** — run `check_scope.sh`, then re-run every DoD command; all must pass.
@@ -184,7 +187,7 @@ All scripts can also be used on their own.
 | :--- | :--- |
 | [`detect_runtime.sh`](scripts/detect_runtime.sh) | Detect the agent ecosystem and print Lead / Worker models as JSON |
 | [`worktree.sh`](scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision` |
-| [`check_scope.sh`](scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist |
+| [`check_scope.sh`](scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
 | [`wt.sh`](scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead |
 
@@ -205,7 +208,8 @@ tests/auth/          # trailing / means the whole directory
 ├── references/
 │   ├── bare-layout.md           # Bare-repo layout and the migration prompt
 │   ├── dispatch.md              # How to dispatch Workers per runtime
-│   ├── execution-plan.md        # Dependency analysis, independent vs staged
+│   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report
+│   ├── plan-critic.md           # Read-only adversarial review of the specs
 │   ├── review-checklist.md      # Diff review and verdict format
 │   └── worker-spec-template.md  # Spec handed to each Worker
 ├── scripts/                     # Bash helpers (see above)
@@ -220,6 +224,7 @@ system git config, and clean up on exit:
 ```bash
 bash tests/worktree_test.sh
 bash tests/migrate_bare_test.sh
+bash tests/check_scope_test.sh
 ```
 
 ## Contributing
@@ -227,7 +232,7 @@ bash tests/migrate_bare_test.sh
 Issues and pull requests are welcome. Before submitting:
 
 1. Keep scripts in Bash with `set -euo pipefail`, matching the existing style.
-2. Add or update tests under `tests/` for any script change, and make sure both test
+2. Add or update tests under `tests/` for any script change, and make sure all test
    suites pass.
 3. Keep `SKILL.md` and the files under `references/` in sync with script behaviour.
 
