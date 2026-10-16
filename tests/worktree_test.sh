@@ -80,6 +80,24 @@ check_eq "default-branch worktree refused" "$rc" 2
 (cd "$std" && bash "$WT" list >/dev/null 2>&1); rc=$?
 check_eq "standard layout refused" "$rc" 2
 
+section "wt.sh link-config"
+mkdir -p "$repo/main/.claude/skills" && echo agents >"$repo/main/AGENTS.md" && echo mine >"$repo/main/CLAUDE.md"
+echo root >"$repo/CLAUDE.md"
+(cd "$repo/main" && bash "$WT" link-config >/dev/null 2>&1); rc=$?
+check_eq "link-config exits 0" "$rc" 0
+check_eq ".claude linked relative to the root" "$(readlink "$repo/.claude")" main/.claude
+check_eq "AGENTS.md linked" "$(readlink "$repo/AGENTS.md")" main/AGENTS.md
+check_eq "real CLAUDE.md at the root left as is" "$(cat "$repo/CLAUDE.md")" root
+check "nothing linked for config main/ lacks" test ! -e "$repo/.gemini" -a ! -L "$repo/.gemini"
+check "second run reports up to date" bash -c "cd '$repo' && bash '$WT' link-config | grep -q 'up to date'"
+rm "$repo/.claude" && ln -s old/.claude "$repo/.claude"
+(cd "$repo" && bash "$WT" link-config >/dev/null 2>&1)
+check_eq "dangling link re-pointed" "$(readlink "$repo/.claude")" main/.claude
+rm "$repo/main/AGENTS.md"
+(cd "$repo" && bash "$WT" link-config >/dev/null 2>&1)
+check "link removed once main/ has no AGENTS.md" test ! -L "$repo/AGENTS.md"
+rm -r "$repo/.claude" "$repo/CLAUDE.md" "$repo/main/.claude" "$repo/main/CLAUDE.md"
+
 section "rundir"
 out=$(cd "$repo/sar/dirty-task" && bash "$W" rundir)
 rd=$(json_get '["run_dir"]' <<<"$out")

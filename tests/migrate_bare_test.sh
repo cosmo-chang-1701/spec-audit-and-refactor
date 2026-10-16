@@ -97,6 +97,33 @@ blocked index-lock "index.lock" touch .git/index.lock
 blocked tmp-exists "already exists" mkdir .sar-migrate-tmp
 blocked sar-leftover "earlier SAR run" git worktree add -q -b sar/old ../sar-old
 
+section "agent config is reachable from the container root"
+repo=$(make_repo agent)
+(cd "$repo" && mkdir -p .claude/skills/demo && echo skill >.claude/skills/demo/SKILL.md &&
+ echo rules >AGENTS.md && git add -A && git commit -qm agent && echo local >CLAUDE.md)
+plan=$(cd "$repo" && bash "$M")
+check_eq "plan lists the root links" \
+  "$(json_get '["after"]["root_links"]' <<<"$plan" | python3 -c 'import ast,sys; print(sorted(l["path"].rsplit("/",1)[1] for l in ast.literal_eval(sys.stdin.read())))')" \
+  "['.claude', 'AGENTS.md', 'CLAUDE.md']"
+out=$(cd "$repo" && bash "$M" --apply); rc=$?
+check_eq "apply exits 0" "$rc" 0
+check "result lists the root links" grep -qF '"target":"main/.claude"' <<<"$out"
+check_eq "root holds .bare, .git, main/ and the links" "$(ls -A "$repo" | tr '\n' ' ')" ".bare .claude .git AGENTS.md CLAUDE.md main "
+check_eq "links are relative" "$(readlink "$repo/.claude")" main/.claude
+check_eq "skill readable from the root" "$(cat "$repo/.claude/skills/demo/SKILL.md")" skill
+check_eq "untracked CLAUDE.md reachable from the root" "$(cat "$repo/CLAUDE.md")" local
+check_eq "main/ status unchanged by the links" "$(git -C "$repo/main" status --porcelain)" "?? CLAUDE.md"
+
+repo=$(make_repo agent-rb)
+(cd "$repo" && mkdir .claude && echo x >.claude/settings.json && git add -A && git commit -qm agent)
+state=$(state_of "$repo") before=$(tree_of "$repo")
+mkdir -p "$WORK/lnshim" && printf '#!/usr/bin/env bash\necho "shim: ln fails" >&2; exit 1\n' >"$WORK/lnshim/ln"
+chmod +x "$WORK/lnshim/ln"
+out=$(cd "$repo" && PATH="$WORK/lnshim:$PATH" bash "$M" --apply 2>&1); rc=$?
+check_eq "failing link: exit 2" "$rc" 2
+check_eq "failing link: files and .git restored" "$(tree_of "$repo")" "$before"
+check_eq "failing link: changes restored" "$(state_of "$repo")" "$state"
+
 section "linked worktrees inside and outside the repo are reconnected"
 repo=$(make_repo linked)
 git -C "$repo" worktree add -q -b in "$repo/.claude/worktrees/in"

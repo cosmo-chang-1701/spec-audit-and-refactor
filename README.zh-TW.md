@@ -50,7 +50,8 @@ Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 
   階段整合後的結果之上。
 - **有上限的審查迴圈**：每個任務最多三輪審查，超過則交由使用者決定。
 - **感知 worktree 佈局**：支援一般 repo 與 bare-repo worktree 佈局，並可就地將 repo 轉換為
-  bare 佈局（先 dry run，失敗時自動 rollback）。
+  bare 佈局（先 dry run，失敗時自動 rollback）。Agent 設定（`.claude/`、`AGENTS.md` 等）會在
+  容器根目錄建立 symlink，在根目錄啟動 agent CLI 時仍能載入專案的 skill。
 - **自動配置環境**：新的 worktree 會自動複製被 gitignore 的 `.env` / `.env.*` 檔案，並以
   symlink 連結 `.venv` 目錄，讓測試能像在原始 checkout 中一樣執行。
 - **支援多種執行環境**：自動偵測 Claude Code、Codex CLI 或 Antigravity，並據此選擇 Lead /
@@ -211,7 +212,7 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | [`run_logged.sh`](scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
 | [`check_scope.sh`](scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
-| [`wt.sh`](scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead |
+| [`wt.sh`](scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead；`link-config` 重新同步容器根目錄的 agent 設定 symlink |
 
 `check_scope.sh` 使用的白名單格式：
 

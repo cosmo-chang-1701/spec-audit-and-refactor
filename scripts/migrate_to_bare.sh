@@ -10,7 +10,10 @@
 #   <repo>/.git/                 <repo>/.bare/       the former .git, core.bare = true
 #   <repo>/<files>               <repo>/.git         file: "gitdir: ./.bare"
 #                                <repo>/<branch>/    worktree on the default branch, holds <files>
+#                                <repo>/.claude ...  symlinks to <branch>/ agent config (below)
 #
+# Agent config at the top level (AGENT_CONFIG) gets a relative symlink at <repo> pointing into
+# <branch>/, so agent CLIs started at <repo> still load its skills and instructions.
 # All moves are renames inside <repo>; nothing is copied and nothing is written outside it.
 # History, branches, stash, hooks, remotes and uncommitted changes (including what is
 # staged) are kept; the result is verified and any failure rolls everything back.
@@ -25,6 +28,8 @@ readonly TMP_NAME=.sar-migrate-tmp
 readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
 readonly STAGE_PREFIX=${SAR_STAGE_PREFIX:-sar-stage/}
 readonly MIN_GIT_MAJOR=2 MIN_GIT_MINOR=31
+# Keep in sync with wt.sh.
+readonly AGENT_CONFIG=(CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini)
 
 die() { printf 'migrate_to_bare: %s\n' "$*" >&2; exit 2; }
 warn() { printf 'migrate_to_bare: %s\n' "$*" >&2; }
@@ -63,9 +68,10 @@ snapshot() {
 }
 
 # Populates: REPO BRANCH DEFAULT_BRANCH WT BARE TMP DIRTY BLOCKERS WARNINGS LINKED_OLD LINKED_NEW
+#            ROOT_LINKS
 inspect() {
   local common git_dir path branch prunable rel entry f name
-  BLOCKERS=() WARNINGS=() LINKED_OLD=() LINKED_NEW=()
+  BLOCKERS=() WARNINGS=() LINKED_OLD=() LINKED_NEW=() ROOT_LINKS=()
   BRANCH="" DEFAULT_BRANCH="" WT="" DIRTY=false
   common=$(git rev-parse --path-format=absolute --git-common-dir)
   if [[ $(git -C "$common" config --bool core.bare 2>/dev/null || true) == true ]]; then
@@ -147,17 +153,18 @@ inspect() {
 
   ((${#BLOCKERS[@]})) && return 0
   [[ -z $(git -C "$REPO" status --porcelain=v1) ]] || DIRTY=true
+  for f in "${AGENT_CONFIG[@]}"; do
+    [[ -e $REPO/$f || -L $REPO/$f ]] && ROOT_LINKS+=("$f")
+  done
   collect_warnings
 }
 
 collect_warnings() {
   local venv f line agent=""
   WARNINGS+=("close editors, terminals, dev servers and containers that use $REPO before converting")
-  for f in CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini; do
-    if [[ -e $REPO/$f ]]; then agent+="${agent:+, }$f"; fi
-  done
+  for f in "${ROOT_LINKS[@]}"; do agent+="${agent:+, }$f"; done
   [[ -z $agent ]] ||
-    WARNINGS+=("agent config ($agent) moves into $BRANCH/: open agent sessions in $WT from now on; one opened at $REPO no longer loads it")
+    WARNINGS+=("agent config ($agent) moves into $BRANCH/ and gets symlinks at $REPO: agent sessions opened at $REPO load the $BRANCH branch's config, sessions in other worktrees their own")
   collect_skill_warnings
   while IFS= read -r venv; do
     venv=$(dirname "$venv")
@@ -201,6 +208,15 @@ collect_skill_warnings() {
   done
 }
 
+# root_links_json <name>...: [{"path": <repo>/<name>, "target": <branch>/<name>}, ...]
+root_links_json() {
+  local f out=""
+  for f in "$@"; do
+    out+="${out:+,}{\"path\":$(json_str "$REPO/$f"),\"target\":$(json_str "$BRANCH/$f")}"
+  done
+  printf '[%s]' "$out"
+}
+
 print_plan() {
   local i linked=""
   for i in "${!LINKED_OLD[@]}"; do
@@ -209,8 +225,8 @@ print_plan() {
   printf '{"eligible":%s,"layout":"bare-repo worktree","repo":%s,"branch":%s,"default_branch":%s,' \
     "$( ((${#BLOCKERS[@]})) && echo false || echo true)" "$(json_str "$REPO")" \
     "$(json_str "$BRANCH")" "$(json_str "$DEFAULT_BRANCH")"
-  printf '"after":{"bare_dir":%s,"git_file":%s,"source_worktree":%s},' \
-    "$(json_str "$BARE")" "$(json_str "$REPO/.git")" "$(json_str "$WT")"
+  printf '"after":{"bare_dir":%s,"git_file":%s,"source_worktree":%s,"root_links":%s},' \
+    "$(json_str "$BARE")" "$(json_str "$REPO/.git")" "$(json_str "$WT")" "$(root_links_json "${ROOT_LINKS[@]}")"
   printf '"dirty":%s,"linked_worktrees":[%s],"blockers":%s,"warnings":%s}\n' \
     "$DIRTY" "$linked" "$(json_list "${BLOCKERS[@]}")" "$(json_list "${WARNINGS[@]}")"
 }
@@ -234,6 +250,9 @@ fail() {
 rollback() {
   local ok=0 f name dir
   set +e
+  if ((STAGE >= 12)); then
+    for f in "${LINKS_MADE[@]}"; do rm -f "$REPO/$f" || ok=1; done
+  fi
   if ((STAGE >= 10)); then
     for f in "${STATE_MOVED[@]}"; do mv -f "$ADMIN/$f" "$BARE/$f" || ok=1; done
   fi
@@ -242,6 +261,7 @@ rollback() {
   if ((STAGE >= 6)); then
     [[ -f $WT/.git ]] && rm -f "$WT/.git"
     [[ $ADMIN == "$BARE"/worktrees/* ]] && { rm -rf "$ADMIN" || ok=1; }
+    rmdir "$BARE/worktrees" 2>/dev/null   # only if this run created it (no linked worktrees)
   fi
   if ((STAGE >= 5)); then
     dir=$WT   # remove the (empty) worktree dir and any parents created for a/b branch names
@@ -266,13 +286,16 @@ rollback() {
 }
 
 manual_recovery() {
+  local f links=""
+  for f in "${LINKS_MADE[@]}"; do [[ -L $REPO/$f ]] && links+=" $REPO/$f"; done
   cat >&2 <<EOF
 migrate_to_bare: ROLLBACK INCOMPLETE (stopped after stage $STAGE). Nothing has been deleted.
   Repository dir : $REPO
   Git dir        : $( [[ -d $BARE ]] && echo "$BARE" || echo "$REPO/.git")
   Checkout files : $( [[ -d $WT && $STAGE -ge 9 ]] && echo "$WT" || echo "$TMP")
   Worktree admin : ${ADMIN:-none}
-Restore by hand, in this order, skipping steps whose source does not exist:
+Restore by hand, in this order, skipping steps whose source does not exist:$(
+  [[ -z $links ]] || printf '\n  0. rm -f%s   (agent-config symlinks)' "$links")
   1. mv -f $ADMIN/{index,ORIG_HEAD,config.worktree,logs/HEAD} $BARE/...   (whichever exist)
   2. mv $WT $TMP ; rm -f $TMP/.git          (only if $TMP/.git is a file)
   3. rm -rf $ADMIN ; rm -f $REPO/.git      (only if $REPO/.git is a file)
@@ -286,7 +309,7 @@ apply() {
   local entry name f p
   if ((${#BLOCKERS[@]})); then print_plan; exit 1; fi
   cd "$REPO"   # the repository dir itself never moves
-  STAGE=0 ADMIN="" MOVED=() STATE_MOVED=()
+  STAGE=0 ADMIN="" MOVED=() STATE_MOVED=() LINKS_MADE=()
   BEFORE=$(snapshot "$REPO")
   case $(git -C "$REPO" config core.fsmonitor || true) in
     ""|false) ;;
@@ -335,11 +358,17 @@ apply() {
     [[ $(git -C "$p" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) == "$BARE" ]] ||
       fail "verify: linked worktree $p is not connected"
   done
+  STAGE=12   # agent config reachable from the container root
+  for f in "${ROOT_LINKS[@]}"; do
+    run ln -s "$BRANCH/$f" "$REPO/$f"
+    LINKS_MADE+=("$f")
+    [[ -e $REPO/$f ]] || fail "verify: symlink $REPO/$f does not resolve"
+  done
   trap - INT TERM
 
-  printf '{"migrated":true,"repo":%s,"bare_dir":%s,"source_worktree":%s,"branch":%s,"repaired_worktrees":%s}\n' \
+  printf '{"migrated":true,"repo":%s,"bare_dir":%s,"source_worktree":%s,"branch":%s,"repaired_worktrees":%s,"root_links":%s}\n' \
     "$(json_str "$REPO")" "$(json_str "$BARE")" "$(json_str "$WT")" "$(json_str "$BRANCH")" \
-    "$(json_list "${LINKED_NEW[@]}")"
+    "$(json_list "${LINKED_NEW[@]}")" "$(root_links_json "${LINKS_MADE[@]}")"
 }
 
 main() {

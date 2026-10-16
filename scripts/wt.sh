@@ -9,17 +9,24 @@
 #                                          #   --check exit 1 if any worktree is dirty or missing
 #   wt.sh add <branch> [<base>]            # worktree at <root>/<branch>
 #   wt.sh remove <branch> [--force]        # remove that worktree; the branch is kept
+#   wt.sh link-config                      # (re)create the agent-config symlinks at <root>
 #
 # add: an existing local branch is checked out as is; a branch that only exists on origin
 # gets a tracking branch; otherwise a new branch (no upstream) starts from <base>, default
 # origin/<default branch> (else <default branch>). Gitignored .env / .env.* files are copied
 # and .venv dirs linked from the default-branch worktree, as for SAR worktrees.
+# link-config: agent CLIs started at <root> load CLAUDE.md, AGENTS.md, GEMINI.md, .claude/,
+# .agents/, .codex/ and .gemini/ through relative symlinks into the default-branch worktree
+# (migrate_to_bare.sh creates them). This adds missing ones, re-points dangling ones, removes
+# those whose target is gone, and leaves real files and symlinks pointing elsewhere alone.
 # Branches under sar/ and sar-stage/ belong to spec-audit-and-refactor: use worktree.sh.
 set -euo pipefail
 export GIT_OPTIONAL_LOCKS=0
 
 readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
 readonly STAGE_PREFIX=${SAR_STAGE_PREFIX:-sar-stage/}
+# Keep in sync with migrate_to_bare.sh.
+readonly AGENT_CONFIG=(CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 readonly SCRIPT_DIR
 
@@ -121,6 +128,35 @@ cmd_remove() {
   while [[ $dir == "$ROOT"/* ]] && rmdir "$dir" 2>/dev/null; do dir=$(dirname "$dir"); done
   git worktree prune
   printf 'removed %s (branch %s kept; delete it with: git branch -d %s)\n' "$path" "$branch" "$branch"
+}
+
+cmd_link_config() {
+  local wt base name dest want cur changed=0
+  (($# == 0)) || die "usage: wt.sh link-config"
+  [[ -n $DEFAULT_BRANCH ]] || die "cannot tell the default branch"
+  wt=$(worktree_entries | awk -F'\t' -v b="$DEFAULT_BRANCH" '$2 == b { print $1; exit }')
+  [[ -n $wt && -d $wt ]] || die "no worktree on the default branch '$DEFAULT_BRANCH'"
+  if [[ $wt == "$ROOT"/* ]]; then base=${wt#"$ROOT"/}; else base=$wt; fi
+  for name in "${AGENT_CONFIG[@]}"; do
+    dest=$ROOT/$name want=$base/$name cur=""
+    [[ -L $dest ]] && cur=$(readlink "$dest")
+    if [[ -e $wt/$name || -L $wt/$name ]]; then
+      if [[ -L $dest && $cur == "$want" ]]; then
+        continue
+      elif [[ -L $dest && -e $dest ]]; then
+        warn "$name points to $cur, not $want; left as is"
+      elif [[ -L $dest ]]; then
+        ln -sfn "$want" "$dest"; printf 're-pointed %s -> %s (was %s)\n' "$name" "$want" "$cur"; changed=1
+      elif [[ -e $dest ]]; then
+        warn "$dest exists and is not a symlink; left as is"
+      else
+        ln -s "$want" "$dest"; printf 'linked %s -> %s\n' "$name" "$want"; changed=1
+      fi
+    elif [[ -L $dest && ( $cur == "$want" || ! -e $dest ) ]]; then
+      rm -f "$dest"; printf 'removed %s (%s has none)\n' "$name" "$DEFAULT_BRANCH"; changed=1
+    fi
+  done
+  ((changed)) || printf 'agent-config symlinks at %s are up to date\n' "$ROOT"
 }
 
 cmd_status() {
@@ -236,6 +272,7 @@ main() {
     status|st) cmd_status "$@" ;;
     add) cmd_add "$@" ;;
     remove|rm) cmd_remove "$@" ;;
+    link-config) cmd_link_config "$@" ;;
     *) die "unknown command: $cmd (see wt.sh --help)" ;;
   esac
 }

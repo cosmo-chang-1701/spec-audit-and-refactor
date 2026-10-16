@@ -12,8 +12,19 @@ container root. SAR task and stage worktrees live in the same container (`sar/<s
 ├── .git              file: gitdir: ./.bare
 ├── main/             worktree on the default branch (dir name = branch name)
 ├── feat/login/       a branch opened later with wt.sh add
-└── sar/<slug>/       Worker worktrees
+├── sar/<slug>/       Worker worktrees
+└── .claude, AGENTS.md, …   symlinks to main/'s agent config (below)
 ```
+
+**Agent config at the root.** Agent CLIs load project skills and instructions from the
+directory they start in. So that `claude`, `agy`, `codex`, … started at `<repo>/` still find
+them, every top-level `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/`, `.agents/`,
+`.codex/` and `.gemini/` of the default-branch worktree has a relative symlink at the root
+(`<repo>/.claude -> main/.claude`). The conversion creates them; `wt.sh link-config`
+re-syncs them later. Git ignores them (the root is not a work tree). A session at the root
+therefore loads the **default branch's** config, and whatever it writes there (e.g.
+`.claude/settings.local.json`) lands in `main/`; a session started in another worktree
+loads that worktree's own config.
 
 ## When to offer it
 Preflight, after `worktree.sh config` and `worktree.sh status`: when the config shows
@@ -31,7 +42,9 @@ layout itself with **this** repo's paths from the plan JSON.
 1. The layout name — **bare-repo worktree layout** — and the one-line definition above.
 2. A before/after tree using this repo's real path and default branch (`after.source_worktree`).
 3. What changes: the code moves from `<repo>/` to `<repo>/<branch>/`; git commands at the
-   `<repo>/` root no longer show a working tree — run them in `<repo>/<branch>/`.
+   `<repo>/` root no longer show a working tree — run them in `<repo>/<branch>/`. If
+   `after.root_links` is not empty: agent config stays reachable from `<repo>/` through
+   those symlinks.
 4. What stays: commit history, all branches, stash, hooks, remotes, and uncommitted changes
    (staged state included). Every step is verified; any failure rolls back automatically.
 5. Every entry of `warnings` from this dry run, rephrased plainly.
@@ -51,9 +64,11 @@ layout itself with **this** repo's paths from the plan JSON.
 > before                         after
 > ~/Projects/my-app/             ~/Projects/my-app/
 > ├── .git/                      ├── .bare/          ← the former .git
-> ├── src/                       ├── .git            ← file: gitdir: ./.bare
+> ├── .claude/                   ├── .git            ← file: gitdir: ./.bare
+> ├── src/                       ├── .claude         ← symlink to main/.claude
 > ├── package.json               ├── main/           ← working directory of branch main
-> └── .env                       │   ├── src/
+> └── .env                       │   ├── .claude/
+>                                │   ├── src/
 >                                │   ├── package.json
 >                                │   └── .env
 >                                ├── feat/login/     ← branches you open later
@@ -62,6 +77,7 @@ layout itself with **this** repo's paths from the plan JSON.
 >
 > - **Changes**: the code moves from `~/Projects/my-app/` to `~/Projects/my-app/main/`.
 >   Running `git status` in `~/Projects/my-app/` itself no longer works; use `main/`.
+>   Agents started in `~/Projects/my-app/` still load `.claude/` (from `main/`).
 > - **Stays**: commit history, all branches, stash, hooks, remotes, and uncommitted
 >   changes (including what is staged).
 > - **Heads-up** (found in this project):
@@ -88,9 +104,10 @@ continue with the standard layout.
    and `default_base` is now `origin/<branch>`. Run every later Lead git/test command there.
 3. Re-read the agent docs (`AGENTS.md`, `CLAUDE.md`, …) from `source_worktree`; they moved.
 4. Tell the user what the warnings asked them to redo (venvs, Compose name, skill symlinks
-   — give the `ln -sfn` commands; do not run them), that agent
-   sessions should be opened in `<repo>/<branch>/` from now on, and that
-   `bash SKILL_DIR/scripts/wt.sh` manages their own worktrees (`add`, `remove`, `status`).
+   — give the `ln -sfn` commands; do not run them), that agent sessions started at `<repo>/`
+   load the `<branch>` config through the `root_links` symlinks (sessions in another
+   worktree load that worktree's), and that `bash SKILL_DIR/scripts/wt.sh` manages their own
+   worktrees (`add`, `remove`, `status`, `link-config`).
 5. Continue the preflight (baseline, `default_base` check). Unpushed commits on the default
    branch now show up as `HEAD` ≠ `default_base` there — agree on the base with the user.
 
@@ -104,8 +121,10 @@ All renames stay inside `<repo>`; nothing is copied or written outside it.
 4. Reconnects linked worktrees (`git worktree repair`), including ones that were nested in
    the checkout and moved with it.
 5. Verifies: status + staged diff + worktree diff hash unchanged, HEAD on the same branch,
-   `.git` resolves to `.bare`, every linked worktree connected. Any failure (or Ctrl-C)
-   rolls back in reverse order and re-checks the original state.
+   `.git` resolves to `.bare`, every linked worktree connected.
+6. Creates the agent-config symlinks at the root (`after.root_links`) and checks each
+   resolves. Any failure (or Ctrl-C) in any step rolls back in reverse order and re-checks
+   the original state.
 
 ### Blockers (nothing is changed)
 | Blocker | Fix |
@@ -123,7 +142,7 @@ All renames stay inside `<repo>`; nothing is copied or written outside it.
 
 ### Warnings (listed in the plan, never block)
 Open editors and processes · agent config files that move (`CLAUDE.md`, `AGENTS.md`,
-`.claude/`, …) · symlinks in the personal skills directories (`~/.claude/skills`,
+`.claude/`, …) and get root symlinks · symlinks in the personal skills directories (`~/.claude/skills`,
 `~/.agents/skills`, `~/.codex/skills`, `~/.gemini/skills`, `~/.gemini/config/skills`) that
 point into the repo, with the `ln -sfn` command that re-points each · the repo itself being a
 skill directory in one of them (`SKILL.md` moves to `<branch>/`) · virtualenvs with absolute paths · top-level Compose files without `name:` ·
@@ -139,6 +158,9 @@ relay them to the user verbatim and do not improvise further moves.
 ### Undoing a successful conversion by hand
 Remove every other worktree first (`wt.sh remove`, `worktree.sh remove`), then from `<repo>`:
 ```bash
+for f in CLAUDE.md AGENTS.md GEMINI.md .claude .agents .codex .gemini; do
+  [[ -L $f ]] && rm "$f"                         # agent-config symlinks at the root
+done
 admin=$(sed -n 's/^gitdir: //p' main/.git)       # .bare/worktrees/main
 rm main/.git && mv "$admin/index" .bare/index && rm -rf "$admin"
 git --git-dir=.bare config core.bare false && rm .git && mv .bare main/.git
@@ -151,5 +173,8 @@ git status
 this layout: `add <branch> [<base>]` creates `<repo>/<branch>` (existing branch as is,
 origin-only branch tracked, else a new branch from `origin/<default>`) and provisions it
 like SAR worktrees; `remove` refuses dirty worktrees without `--force` and keeps the branch;
-`status [-v|-s|--check]` shows every worktree's changes and upstream state. It refuses
+`status [-v|-s|--check]` shows every worktree's changes and upstream state; `link-config`
+re-syncs the agent-config symlinks at the root with the default-branch worktree (adds
+missing, re-points dangling, drops those whose target is gone; leaves real files and links
+pointing elsewhere alone). It refuses
 `sar/*` and `sar-stage/*` branches — those belong to `worktree.sh`. The Lead does not use it.

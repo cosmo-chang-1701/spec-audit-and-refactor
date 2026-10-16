@@ -224,7 +224,7 @@ Tasks loop independently of each other.
 | `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
 | `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
 | `scripts/migrate_to_bare.sh [--apply]` | Plan (default) or perform the in-place conversion to the bare-repo worktree layout; see [references/bare-layout.md](references/bare-layout.md) | 0 ok, 1 blocked, 2 failed + rolled back, 3 rollback incomplete |
-| `scripts/wt.sh add\|remove\|list\|status` | For people, not the Lead: everyday branch worktrees in the bare layout | 0 ok, 1 dirty/missing (`status --check`), 2 error |
+| `scripts/wt.sh add\|remove\|list\|status\|link-config` | For people, not the Lead: everyday branch worktrees in the bare layout; `link-config` re-syncs the agent-config symlinks at the container root | 0 ok, 1 dirty/missing (`status --check`), 2 error |
 
 Script tests (throwaway repos in a temp dir only): `bash SKILL_DIR/tests/migrate_bare_test.sh`,
 `bash SKILL_DIR/tests/worktree_test.sh`, `bash SKILL_DIR/tests/check_scope_test.sh`,

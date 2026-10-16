@@ -54,6 +54,8 @@ verifies it again at close-out.
 - **Bounded review loop**: at most three review rounds per task, then escalation to the user.
 - **Layout-aware**: works with standard repos and the bare-repo worktree layout, and can
   convert a repo to the bare layout in place (dry run first, automatic rollback on failure).
+  Agent config (`.claude/`, `AGENTS.md`, …) gets symlinks at the container root, so agent
+  CLIs started there still load the project's skills.
 - **Auto-provisioning**: gitignored `.env` / `.env.*` files are copied and `.venv`
   directories symlinked into new worktrees so tests run there as they do in the source.
 - **Multi-runtime**: detects Claude Code, Codex CLI or Antigravity and picks Lead / Worker
@@ -225,7 +227,7 @@ All scripts can also be used on their own.
 | [`run_logged.sh`](scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
 | [`check_scope.sh`](scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
-| [`wt.sh`](scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead |
+| [`wt.sh`](scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead; `link-config` re-syncs the agent-config symlinks at the container root |
 
 Whitelist format used by `check_scope.sh`:
 
