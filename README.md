@@ -58,19 +58,27 @@ verifies it again at close-out.
   directories symlinked into new worktrees so tests run there as they do in the source.
 - **Multi-runtime**: detects Claude Code, Codex CLI or Antigravity and picks Lead / Worker
   models accordingly.
+- **Lean Lead context**: the run is split into two sessions (plan, then execute) with its
+  state kept in a persistent run dir, and every test/lint/DoD command runs through
+  `run_logged.sh`, so only a one-line summary (plus a tail on failure) reaches the Lead.
 
 ## How it works
 
 ```mermaid
 flowchart LR
+    subgraph P1[Phase 1 · session 1]
     A[0. Preflight] --> B[1. Audit<br/>read-only]
     B --> C[2. Spec<br/>dry run + critic<br/>user approval]
-    C --> D[3. Worktree<br/>+ dispatch]
+    end
+    C -->|state.json<br/>/clear + resume| R[Resume]
+    subgraph P2[Phase 2 · fresh session]
+    R --> D[3. Worktree<br/>+ dispatch]
     D --> E[4. Gate<br/>scope + DoD]
     E --> F[5. Review<br/>≤ 3 rounds]
     F -->|REQUEST_CHANGES| D
     F -->|next stage| D
     F -->|APPROVE| G[6. Close-out]
+    end
 ```
 
 1. **Preflight** — detect the runtime and worktree layout, check for leftover tasks,
@@ -83,13 +91,20 @@ flowchart LR
    for larger or riskier plans have a read-only [Plan Critic](references/plan-critic.md)
    challenge the specs. The user gets a decision matrix (scope, risk, shared resources per
    task) ahead of the full specs. **Nothing is dispatched until the user approves.**
+   After approval the Lead writes `state.json` to the run dir and ends phase 1: run `/clear`,
+   switch to the phase 2 Lead model, and invoke the skill with `resume`. The new session
+   checks the baseline and base commit, reads only the plan and the current stage's specs,
+   and continues.
 4. **Worktree + dispatch** — create one worktree per task on branch `sar/<slug>` and
    dispatch the stage's Workers in parallel (see [dispatch.md](references/dispatch.md)).
-5. **Gate** — run `check_scope.sh`, then re-run every DoD command; all must pass.
+5. **Gate** — run `check_scope.sh`, then re-run every DoD command (through
+   `run_logged.sh`); all must pass.
 6. **Review** — review the diff against the recorded base using the
    [review checklist](references/review-checklist.md). In staged mode, approved tasks are
-   committed locally and merged into `sar-stage/<n>` before the next stage starts.
-7. **Close-out** — verify the baseline is unchanged, offer PRs, and remove worktrees.
+   committed locally and merged into `sar-stage/<n>` before the next stage starts; between
+   stages the user may again continue in a fresh session.
+7. **Close-out** — verify the baseline is unchanged, offer PRs, remove worktrees, and
+   archive the run dir.
    Pushing, opening PRs and deleting worktrees each require explicit user consent.
 
 The full procedure lives in [SKILL.md](SKILL.md).
@@ -129,19 +144,28 @@ Run a spec-driven Lead-Worker implementation of the plan in docs/plan.md.
 Review the worker's branch sar/fix-token-expiry before merging.
 ```
 
-A typical session pauses twice for your input: once to agree on audit scope, and once to
-approve the gap report, specs and execution plan. Commits, pushes, PRs and worktree
-removal are always confirmed with you first.
+A typical run pauses twice for your input: once to agree on audit scope, and once to
+approve the gap report, specs and execution plan. After that approval the Lead asks you to
+start a fresh session and continue with:
+
+```text
+/clear
+/model sonnet        # the phase 2 Lead model (Claude Code); /effort high
+/spec-audit-and-refactor resume
+```
+
+Commits, pushes, PRs and worktree removal are always confirmed with you first.
 
 ### Default model assignment
 
-| Ecosystem | Lead | Worker |
-| :--- | :--- | :--- |
-| Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini (Antigravity) | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
-| Codex | `model` from `~/.codex/config.toml` · high | same model · medium |
+| Ecosystem | Lead · phase 1 (audit, spec, critic) | Lead · phase 2 (dispatch, gate, review) | Worker |
+| :--- | :--- | :--- | :--- |
+| Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
+| Gemini (Antigravity) | `gemini-3.8-flash-high` · high | same as phase 1 | `gemini-3.8-flash-high` · high |
+| Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium |
 
-Override with `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`.
+Override with `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
+`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`.
 
 ## Configuration
 
@@ -153,6 +177,11 @@ automatically:
 | Task worktree | `<root>/sar/<slug>` | `<parent>/worktrees/<repo>/<slug>` |
 | Stage worktree | `<root>/sar-stage/<id>` | `<parent>/worktrees/<repo>/_stage-<id>` |
 | Default base | `origin/<default branch>` | `HEAD` |
+| Run dir | `<root>/.bare/sar-run/` | `<repo>/.git/sar-run/` |
+
+The run dir (`worktree.sh rundir`) holds the plan, specs, whitelists, logs and `state.json`
+of the current run. It sits in the git common dir, so it never shows up as a change, is
+shared by all worktrees, and survives a new agent session.
 
 For repos that deviate, add `.agents/spec-audit.json`:
 
@@ -176,6 +205,7 @@ For repos that deviate, add `.agents/spec-audit.json`:
 | `SAR_BRANCH_PREFIX` | Task branch prefix (default `sar/`) |
 | `SAR_STAGE_PREFIX` | Stage branch prefix (default `sar-stage/`) |
 | `SAR_ECOSYSTEM` | Force the runtime ecosystem (`claude`, `gemini`, `codex`) |
+| `SAR_LOG_TAIL` | Lines of log `run_logged.sh` prints on failure (default `40`) |
 
 See `scripts/worktree.sh --help` for the full resolution rules.
 
@@ -185,8 +215,9 @@ All scripts can also be used on their own.
 
 | Script | Purpose |
 | :--- | :--- |
-| [`detect_runtime.sh`](scripts/detect_runtime.sh) | Detect the agent ecosystem and print Lead / Worker models as JSON |
-| [`worktree.sh`](scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision` |
+| [`detect_runtime.sh`](scripts/detect_runtime.sh) | Detect the agent ecosystem and print the phase 1 / phase 2 Lead and Worker models as JSON |
+| [`worktree.sh`](scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir` |
+| [`run_logged.sh`](scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
 | [`check_scope.sh`](scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
 | [`wt.sh`](scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead |
@@ -208,7 +239,7 @@ tests/auth/          # trailing / means the whole directory
 ├── references/
 │   ├── bare-layout.md           # Bare-repo layout and the migration prompt
 │   ├── dispatch.md              # How to dispatch Workers per runtime
-│   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report
+│   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report, run state
 │   ├── plan-critic.md           # Read-only adversarial review of the specs
 │   ├── review-checklist.md      # Diff review and verdict format
 │   └── worker-spec-template.md  # Spec handed to each Worker
@@ -225,6 +256,8 @@ system git config, and clean up on exit:
 bash tests/worktree_test.sh
 bash tests/migrate_bare_test.sh
 bash tests/check_scope_test.sh
+bash tests/run_logged_test.sh
+bash tests/detect_runtime_test.sh
 ```
 
 ## Contributing

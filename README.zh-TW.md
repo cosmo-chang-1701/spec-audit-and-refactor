@@ -55,19 +55,26 @@ Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 
   symlink 連結 `.venv` 目錄，讓測試能像在原始 checkout 中一樣執行。
 - **支援多種執行環境**：自動偵測 Claude Code、Codex CLI 或 Antigravity，並據此選擇 Lead /
   Worker 模型。
+- **精簡 Lead 的 context**：整個流程分成兩個 session（先規劃、再執行），狀態保存在持久的 run dir；
+  所有 test / lint / DoD 指令都透過 `run_logged.sh` 執行，Lead 只會看到一行摘要（失敗時附上最後幾行）。
 
 ## 運作方式
 
 ```mermaid
 flowchart LR
+    subgraph P1[Phase 1 · 第一個 session]
     A[0. 前置檢查] --> B[1. 稽核<br/>唯讀]
     B --> C[2. Spec<br/>預檢 + Critic<br/>使用者核准]
-    C --> D[3. Worktree<br/>+ 派工]
+    end
+    C -->|state.json<br/>/clear + resume| R[接續]
+    subgraph P2[Phase 2 · 新的 session]
+    R --> D[3. Worktree<br/>+ 派工]
     D --> E[4. 檢查<br/>範圍 + DoD]
     E --> F[5. 審查<br/>最多 3 輪]
     F -->|REQUEST_CHANGES| D
     F -->|下一階段| D
     F -->|APPROVE| G[6. 收尾]
+    end
 ```
 
 1. **前置檢查**：偵測執行環境與 worktree 佈局、檢查先前遺留的任務、記錄 Lead checkout 的基準狀態。
@@ -78,12 +85,16 @@ flowchart LR
    重疊、預先執行每條 DoD 指令以找出無效或無法達成的指令；任務較多或風險較高時，再由唯讀的
    [Plan Critic](references/plan-critic.md) 挑戰 spec。呈報時先給使用者決策矩陣（各任務的範圍、
    風險與共用資源），再附完整 spec。**使用者核准前不會派出任何 Worker。**
+   核准後，Lead 把 `state.json` 寫入 run dir 並結束 phase 1：執行 `/clear`、切換到 phase 2 的
+   Lead 模型，再以 `resume` 呼叫本 skill。新的 session 會先核對基準狀態與 base commit，只讀取
+   執行計畫與當前階段的 spec，然後接續執行。
 4. **Worktree + 派工**：為每個任務在 `sar/<slug>` 分支上建立 worktree，並平行派出該階段的
    Worker（詳見 [dispatch.md](references/dispatch.md)）。
-5. **檢查**：執行 `check_scope.sh`，再重新執行所有 DoD 指令，全部都必須通過。
+5. **檢查**：執行 `check_scope.sh`，再透過 `run_logged.sh` 重新執行所有 DoD 指令，全部都必須通過。
 6. **審查**：依照[審查清單](references/review-checklist.md)，對照記錄的基準審查 diff。
-   在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sar-stage/<n>`，才進入下一階段。
-7. **收尾**：確認基準狀態未變、提供建立 PR 的選項，並移除 worktree。
+   在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sar-stage/<n>`，才進入下一階段；
+   階段之間也可以再換到新的 session 繼續。
+7. **收尾**：確認基準狀態未變、提供建立 PR 的選項、移除 worktree，並封存 run dir。
    push、開 PR 與刪除 worktree 都需要使用者明確同意。
 
 完整流程請見 [SKILL.md](SKILL.md)。
@@ -124,17 +135,26 @@ ln -s ~/.agents/skills/spec-audit-and-refactor ~/.claude/skills/spec-audit-and-r
 ```
 
 一般流程會停下來等你兩次：一次是議定稽核範圍，一次是核准缺口報告、spec 與執行計畫。
+核准之後，Lead 會請你開一個新的 session 接續：
+
+```text
+/clear
+/model sonnet        # phase 2 的 Lead 模型（Claude Code）；/effort high
+/spec-audit-and-refactor resume
+```
+
 commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 
 ### 預設模型分配
 
-| 生態系 | Lead | Worker |
-| :--- | :--- | :--- |
-| Claude（Claude Code） | `claude-opus-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini（Antigravity） | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
-| Codex | `~/.codex/config.toml` 中的 `model` · high | 同一模型 · medium |
+| 生態系 | Lead · phase 1（稽核、spec、Critic） | Lead · phase 2（派工、檢查、審查） | Worker |
+| :--- | :--- | :--- | :--- |
+| Claude（Claude Code） | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
+| Gemini（Antigravity） | `gemini-3.8-flash-high` · high | 與 phase 1 相同 | `gemini-3.8-flash-high` · high |
+| Codex | `~/.codex/config.toml` 中的 `model` · high | 與 phase 1 相同 | 同一模型 · medium |
 
-可用 `SAR_LEAD_MODEL`、`SAR_LEAD_EFFORT`、`SAR_WORKER_MODEL`、`SAR_WORKER_EFFORT` 覆寫。
+可用 `SAR_LEAD_MODEL`、`SAR_LEAD_EFFORT`、`SAR_LEAD2_MODEL`、`SAR_LEAD2_EFFORT`、
+`SAR_WORKER_MODEL`、`SAR_WORKER_EFFORT` 覆寫。
 
 ## 設定
 
@@ -145,6 +165,10 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 | 任務 worktree | `<root>/sar/<slug>` | `<parent>/worktrees/<repo>/<slug>` |
 | 階段 worktree | `<root>/sar-stage/<id>` | `<parent>/worktrees/<repo>/_stage-<id>` |
 | 預設 base | `origin/<default branch>` | `HEAD` |
+| Run dir | `<root>/.bare/sar-run/` | `<repo>/.git/sar-run/` |
+
+Run dir（`worktree.sh rundir`）存放本次執行的計畫、spec、白名單、log 與 `state.json`。它位於
+git common dir 內，所以永遠不會被當成變更、所有 worktree 共用，換了新的 agent session 也還在。
 
 若 repo 有特殊需求，可新增 `.agents/spec-audit.json`：
 
@@ -168,6 +192,7 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 | `SAR_BRANCH_PREFIX` | 任務分支前綴（預設 `sar/`） |
 | `SAR_STAGE_PREFIX` | 階段分支前綴（預設 `sar-stage/`） |
 | `SAR_ECOSYSTEM` | 強制指定執行環境生態系（`claude`、`gemini`、`codex`） |
+| `SAR_LOG_TAIL` | `run_logged.sh` 失敗時印出的 log 行數（預設 `40`） |
 
 完整的解析規則請執行 `scripts/worktree.sh --help`。
 
@@ -177,8 +202,9 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 
 | 腳本 | 用途 |
 | :--- | :--- |
-| [`detect_runtime.sh`](scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 Lead / Worker 模型 |
-| [`worktree.sh`](scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision` |
+| [`detect_runtime.sh`](scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 phase 1 / phase 2 的 Lead 與 Worker 模型 |
+| [`worktree.sh`](scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir` |
+| [`run_logged.sh`](scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
 | [`check_scope.sh`](scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
 | [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
 | [`wt.sh`](scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead |
@@ -200,7 +226,7 @@ tests/auth/          # 結尾的 / 代表整個目錄
 ├── references/
 │   ├── bare-layout.md           # bare-repo 佈局與轉換提問的格式
 │   ├── dispatch.md              # 各執行環境的 Worker 派工方式
-│   ├── execution-plan.md        # 相依性分析、執行模式與 checkpoint 呈報格式
+│   ├── execution-plan.md        # 相依性分析、執行模式、checkpoint 呈報格式與執行狀態
 │   ├── plan-critic.md           # 對 spec 的唯讀對抗式審查
 │   ├── review-checklist.md      # diff 審查與判定格式
 │   └── worker-spec-template.md  # 交給每個 Worker 的 spec 範本
@@ -216,6 +242,8 @@ tests/auth/          # 結尾的 / 代表整個目錄
 bash tests/worktree_test.sh
 bash tests/migrate_bare_test.sh
 bash tests/check_scope_test.sh
+bash tests/run_logged_test.sh
+bash tests/detect_runtime_test.sh
 ```
 
 ## 貢獻

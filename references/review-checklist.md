@@ -1,14 +1,21 @@
 # PR Review Checklist (Lead)
 
-Review the task diff, not the whole repo:
+Review the task diff, not the whole repo. Start with the stat; read the full diff only when
+it is small, otherwise file by file (append `-- <path>`), so a large change does not flood the
+context:
 
 ```bash
-git -C <worktree> diff "$(cat "$(git -C <worktree> rev-parse --absolute-git-dir)/sar-base")" --stat
-git -C <worktree> diff "$(cat "$(git -C <worktree> rev-parse --absolute-git-dir)/sar-base")"
+base=$(cat "$(git -C <worktree> rev-parse --absolute-git-dir)/sar-base")
+git -C <worktree> diff "$base" --stat
+git -C <worktree> diff "$base" [-- <path>]
 ```
 
+In later rounds, review only what changed since the previous round: note the files the
+findings named and re-read just those, plus any new entries in `--stat`.
+
 Only proceed to review once the gates pass: `check_scope.sh` exits 0 **and** you re-ran
-every DoD command yourself in the worktree (never trust the Worker's report alone).
+every DoD command yourself in the worktree through `run_logged.sh` (never trust the Worker's
+report alone).
 
 ## What to check, in priority order
 1. **Correctness** — logic errors, unhandled edge cases (empty/null/boundary/concurrency),
@@ -39,7 +46,8 @@ Findings (blocking first):
 
 ## Loop rules
 - REQUEST_CHANGES → send the Worker the numbered blocking findings plus the original spec
-  (same worktree, same whitelist). Max **3 rounds**; after that, stop and escalate to the user
+  (same worktree, same whitelist), and store the findings as the task's `open_findings` in
+  `state.json`. Max **3 rounds**; after that, stop and escalate to the user
   with the remaining findings.
 - A finding that requires a file outside the whitelist is a spec change: ask the user before
   widening the whitelist. With parallel tasks, also check the new file is not in another

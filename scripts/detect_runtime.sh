@@ -11,7 +11,10 @@
 #                               several keys at once are common and ambiguous)
 #   5. Fallback                (claude)
 #
-# Per-field overrides: SAR_LEAD_MODEL, SAR_LEAD_EFFORT, SAR_WORKER_MODEL, SAR_WORKER_EFFORT.
+# Roles: "lead" runs phase 1 (preflight, audit, spec, checkpoint); "lead_phase2" runs
+# phase 2 (dispatch, gate, review, close-out) in a fresh session; "worker" implements.
+# Per-field overrides: SAR_LEAD_MODEL, SAR_LEAD_EFFORT, SAR_LEAD2_MODEL, SAR_LEAD2_EFFORT,
+# SAR_WORKER_MODEL, SAR_WORKER_EFFORT.
 # Output: a single JSON object on stdout.
 set -euo pipefail
 
@@ -47,7 +50,7 @@ while (($#)); do
   case $1 in
     --agent) [[ $# -ge 2 ]] || die "--agent needs a value"; agent_flag=$2; shift 2 ;;
     --agent=*) agent_flag=${1#*=}; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -80,26 +83,32 @@ fi
 case $ecosystem in
   claude)
     lead_model=claude-opus-5-5   lead_effort=high
+    lead2_model=claude-sonnet-5-5 lead2_effort=high
     worker_model=claude-sonnet-5-5 worker_effort=medium
     worker_alias=sonnet ;;
   gemini)
     # Antigravity encodes effort in the model id (see `agy models`).
     lead_model=gemini-3.8-flash-high   lead_effort=high
+    lead2_model=$lead_model            lead2_effort=$lead_effort
     worker_model=gemini-3.8-flash-high worker_effort=high
     worker_alias=gemini-3.8-flash-high ;;
   codex)
     lead_model=$(codex_configured_model) lead_effort=high
+    lead2_model=$lead_model              lead2_effort=$lead_effort
     worker_model=$lead_model             worker_effort=medium
     worker_alias=$lead_model ;;
 esac
 
 lead_model=${SAR_LEAD_MODEL:-$lead_model}
 lead_effort=${SAR_LEAD_EFFORT:-$lead_effort}
+lead2_model=${SAR_LEAD2_MODEL:-$lead2_model}
+lead2_effort=${SAR_LEAD2_EFFORT:-$lead2_effort}
 worker_model=${SAR_WORKER_MODEL:-$worker_model}
 worker_effort=${SAR_WORKER_EFFORT:-$worker_effort}
 [[ -n ${SAR_WORKER_MODEL:-} ]] && worker_alias=$SAR_WORKER_MODEL
 
-printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"}}\n' \
+printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s"},"lead_phase2":{"model":"%s","effort":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"}}\n' \
   "$ecosystem" "$(json_escape "$detected_by")" \
   "$(json_escape "$lead_model")" "$(json_escape "$lead_effort")" \
+  "$(json_escape "$lead2_model")" "$(json_escape "$lead2_effort")" \
   "$(json_escape "$worker_model")" "$(json_escape "$worker_effort")" "$(json_escape "$worker_alias")"

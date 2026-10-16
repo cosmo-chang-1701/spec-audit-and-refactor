@@ -66,18 +66,19 @@ Stage 3 (base sar-stage/2):  drop-legacy-auth ← migrate-callers
 Inter-stage: local commits on sar/* and sar-stage/* branches, merges via worktree.sh integrate; no push
 ```
 
-**④ Gap report and full specs**, with the scratch path of each spec file.
+**④ Gap report and full specs**, with the run-dir path of each spec file.
 
 For `staged`, explicitly ask the user to approve the inter-stage local commits and merges.
 That approval covers only those local operations; push and PR creation still need their own
-consent at close-out.
+consent at close-out. Record it in `state.json` (§7) so a phase 2 session can rely on it.
 
 ## 4. Running a stage
 `independent` mode is a single stage without steps 4–6.
 
 1. **Create** — `worktree.sh create <slug> --base <stage base>` for each task in the stage
    (stage 1: `default_base`, i.e. omit `--base`; stage *n*: `sar-stage/<n-1>`).
-   Stage 2+: dry-run each task's DoD in its new worktree and update the `# baseline:` notes
+   Stage 2+: dry-run each task's DoD in its new worktree (through `run_logged.sh`) and update
+   the `# baseline:` notes
    per [worker-spec-template.md](worker-spec-template.md#dod-dry-run) before dispatching.
 2. **Dispatch** — all Workers of the stage at once, per [dispatch.md](dispatch.md).
 3. **Gate + review per task** — `check_scope.sh`, re-run its DoD, review per
@@ -90,12 +91,15 @@ consent at close-out.
    Exit 1 = merge conflict (conflicting files are listed): the whitelists overlapped after all,
    so fix the plan (re-split, or move a task to a later stage) and ask the user if specs change.
 6. **Integration gate** — in the stage worktree, re-run every DoD command of the stage
-   (plus the project's full test command if one exists). This catches tasks that pass alone
+   (plus the project's full test command if one exists), each through `run_logged.sh`
+   (logs `stage-<n>-gate-<k>.log`). This catches tasks that pass alone
    but break together. On failure, find the responsible task and send REQUEST_CHANGES to its
    Worker in its own worktree (counts toward its rounds); after APPROVE, commit again,
    `worktree.sh remove --stage <n> --force`, and re-run step 5.
 7. Only then create the next stage's worktrees on `sar-stage/<n>`. Each new worktree records
-   that as its base, so `check_scope.sh` sees only the task's own changes.
+   that as its base, so `check_scope.sh` sees only the task's own changes. Before that, mark
+   the stage `integrated` and advance `current_stage` in `state.json`; this is the point where
+   the user may continue in a fresh session (`/clear`, then `resume`).
 
 ## 5. When a task fails
 A task that is still REQUEST_CHANGES after 3 rounds (or is blocked on a non-whitelisted file)
@@ -113,3 +117,37 @@ Never silently drop a task or its dependents.
 - Remove task worktrees with `worktree.sh remove <slug>` and stage worktrees with
   `worktree.sh remove --stage <n>`. A stage branch built only from merges is deleted locally
   (task branches are kept unless merged), so push or keep the PR's stage branch first.
+
+## 7. Run state
+`<run dir>/state.json` (run dir = `worktree.sh rundir`) is what a fresh phase 2 session
+resumes from. The Lead writes it at the checkpoint and rewrites it on every status change.
+It records facts only — decisions stay in `plan.md` and the specs.
+
+```json
+{
+  "phase": 2,
+  "approved_at": "2026-10-16T09:30:00Z",
+  "approval": "Plan as shown; inter-stage local commits and merges approved (no push).",
+  "source_worktree": "/abs/path/to/main",
+  "baseline": "<exact output of the step 0 baseline command>",
+  "default_base": "origin/main",
+  "default_base_sha": "1a2b3c4d…",
+  "mode": "staged",
+  "max_parallel": 4,
+  "current_stage": 1,
+  "stages": [
+    {"n": 1, "status": "pending", "tasks": ["fix-auth-token", "add-rate-limit"]},
+    {"n": 2, "status": "pending", "tasks": ["migrate-callers"]}
+  ],
+  "tasks": {
+    "fix-auth-token": {"stage": 1, "status": "pending", "round": 0, "worktree": null, "open_findings": []}
+  }
+}
+```
+
+- Stage status: `pending` → `running` → `integrated` (or `deferred`).
+- Task status: `pending` → `dispatched` → `in-review` (with `round`) → `approved` →
+  `committed`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
+  last REQUEST_CHANGES, so a resumed session can re-dispatch with them.
+- `approval` quotes what the user approved at the checkpoint; a resumed Lead never assumes
+  more than it says.

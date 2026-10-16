@@ -78,8 +78,10 @@ If the DoD cannot be met without touching a non-whitelisted file, STOP and repor
 and the reason instead of editing it.
 
 ## Report back (final message)
+Keep it short — the Lead re-runs every DoD command itself.
 1. Summary of changes per file (one line each).
-2. Full output (or tail) of each DoD command.
+2. Each DoD command with its exit code; for a non-zero exit, only its last 20 lines. Do not
+   paste full output.
 3. Anything skipped, assumed, or left for follow-up.
 ```
 
@@ -90,7 +92,10 @@ from, so a broken or unreachable DoD never reaches a Worker:
 - stage 2+: in the task's worktree right after `worktree.sh create`, before dispatch — its
   base `sar-stage/<n-1>` does not exist at the checkpoint.
 
-Classify each command and write the class into the spec as `# baseline: <class>`:
+Run each command through `run_logged.sh` (log `<run dir>/logs/<slug>-dry-<n>.log`), so only
+its exit code and, on failure, its tail reach the Lead. Classify each command and write the
+class into the spec as `# baseline: <class>`; collect command, class, and tail in
+`<run dir>/dod-dry-run.md`:
 
 | Class | Meaning | Action |
 | :--- | :--- | :--- |

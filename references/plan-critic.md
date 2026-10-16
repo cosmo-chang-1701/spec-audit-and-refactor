@@ -12,10 +12,11 @@ Run it at step 2, after the overlap check and the DoD dry run, when **any** of t
 
 Otherwise skip it and say so in the checkpoint ("Critic: skipped — single low-risk task").
 
-## Inputs (all as files in the scratch dir)
+## Inputs (all as files in the run dir)
 - `gap-report.md`, `plan.md`, every `spec-<slug>.md` and `<slug>.wl` (saved at step 2);
 - `overlap-stage-<n>.txt` — the `check_scope.sh --overlap` output per stage, redirected there;
-- `dod-dry-run.md` — each dry-run command with its class and the tail of its output
+- `dod-dry-run.md` — each dry-run command with its class and the tail of its output (from
+  the `run_logged.sh` summary or its log, never the full output)
   ([worker-spec-template.md](worker-spec-template.md#dod-dry-run));
 - the absolute path of `source_worktree` (the code the plan was written against).
 
@@ -28,7 +29,7 @@ create, or delete files, and do not run tests, builds, installs, or git commands
 state. Reading files and searching (`git grep`, `rg`, `git log`, `git show`) are allowed.
 
 - Code: <source_worktree absolute path>
-- Plan files: <scratch dir>/gap-report.md, spec-<slug>.md, <slug>.wl, plan.md,
+- Plan files: <run dir>/gap-report.md, spec-<slug>.md, <slug>.wl, plan.md,
   overlap-stage-<n>.txt, dod-dry-run.md
 
 Find concrete problems in four areas. Each finding needs evidence from the code or the plan
@@ -51,13 +52,14 @@ End with "No findings" if there are none.
 ```
 
 ## Dispatch
-Use the **Lead** model and effort (not the Worker's); the review needs judgment, not speed.
+The Critic runs in phase 1: use the phase 1 **Lead** model and effort (`lead`, not
+`lead_phase2` or the Worker's); the review needs judgment, not speed.
 
 | Runtime | Call |
 | :--- | :--- |
 | Claude Code | `Agent` with `subagent_type: Plan` (no edit tools), `model` of the Lead (`opus`), the prompt above. No `isolation`. |
-| Codex | `codex exec -C "<source_worktree>" -m "<lead model>" -c model_reasoning_effort="<lead effort>" -s read-only -o "<scratch>/critic.md" - < "<scratch>/critic-prompt.md"` |
-| Antigravity | `(cd "<source_worktree>" && agy -p "$(cat "<scratch>/critic-prompt.md")" --model "<lead model>" --mode plan --output-format text) > "<scratch>/critic.md"` |
+| Codex | `codex exec -C "<source_worktree>" -m "<lead model>" -c model_reasoning_effort="<lead effort>" -s read-only -o "<run dir>/critic.md" - < "<run dir>/critic-prompt.md"` |
+| Antigravity | `(cd "<source_worktree>" && agy -p "$(cat "<run dir>/critic-prompt.md")" --model "<lead model>" --mode plan --output-format text) > "<run dir>/critic.md"` |
 
 Afterwards re-run the step 0 baseline command on `source_worktree`; it must still match.
 

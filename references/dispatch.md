@@ -14,8 +14,9 @@ Use the subagent tool (`Agent` / `Task`), not a shell call:
   under the worktree (or `cd` there in each shell command).
 - Do **not** set `isolation: "worktree"` — the worktree is already managed by `worktree.sh`.
 
-Lead model: Opus 5.5 / high. If the current session is not on Opus, tell the user to switch
-with `/model` (and effort with `/effort`) rather than proceeding silently.
+Dispatch runs in phase 2, so the Lead is the `lead_phase2` model (Sonnet 5.5 / high by
+default). If the current session is on another model, tell the user to switch with `/model`
+(and effort with `/effort`) rather than proceeding silently.
 
 ## Codex CLI (ecosystem: codex)
 ```bash
@@ -24,17 +25,17 @@ codex exec \
   -m "<worker.model>" \
   -c model_reasoning_effort="<worker.effort>" \
   -s workspace-write \
-  -o "<scratch>/worker-<slug>.md" \
-  - < "<scratch>/spec-<slug>.md"
+  -o "<run dir>/worker-<slug>.md" \
+  - < "<run dir>/spec-<slug>.md"
 ```
 `-s workspace-write` confines writes to the worktree; `-o` captures the Worker's final report.
 
 ## Antigravity CLI (ecosystem: gemini)
 ```bash
-(cd "<worktree>" && agy -p "$(cat "<scratch>/spec-<slug>.md")" \
+(cd "<worktree>" && agy -p "$(cat "<run dir>/spec-<slug>.md")" \
   --model "<worker.dispatch_model>" \
   --mode accept-edits \
-  --output-format text) > "<scratch>/worker-<slug>.md"
+  --output-format text) > "<run dir>/worker-<slug>.md"
 ```
 Model ids carry the effort suffix (`gemini-3.8-flash-high`); list them with `agy models`.
 If the Antigravity session exposes a native subagent tool, prefer it with the same model.
@@ -53,8 +54,8 @@ Respect the concurrency cap (`max_parallel`, default 4); dispatch the rest as ea
   and its own report file, then `wait` for all of them:
   ```bash
   for slug in fix-auth-token add-rate-limit; do
-    codex exec -C "<worktree-of-$slug>" ... -o "<scratch>/worker-$slug.md" \
-      - < "<scratch>/spec-$slug.md" &
+    codex exec -C "<worktree-of-$slug>" ... -o "<run dir>/worker-$slug.md" \
+      - < "<run dir>/spec-$slug.md" &
   done
   wait
   ```
@@ -63,6 +64,11 @@ Respect the concurrency cap (`max_parallel`, default 4); dispatch the rest as ea
   in Claude Code; a new `codex exec` / `agy` run in the same worktree otherwise).
 
 ## Any runtime
-- Keep spec and report files in a scratch/temp directory, never inside the worktree
-  (they would show up as untracked files and fail the scope gate). Name them per slug.
-- After each Worker returns: `check_scope.sh`, then re-run the DoD yourself.
+- Keep spec and report files in the run dir (`worktree.sh rundir`), never inside the
+  worktree (they would show up as untracked files and fail the scope gate). Name them per slug.
+- After each Worker returns: `check_scope.sh`, then re-run the DoD yourself through
+  `run_logged.sh`. The Worker's report holds exit codes and failure tails only; do not ask
+  it for full command output.
+- Mark the task `dispatched` in `state.json` when it starts. A Worker cannot be reached from
+  a later session, so on [resume](../SKILL.md#resume-phase-2) an unfinished task is
+  re-dispatched into its existing worktree.

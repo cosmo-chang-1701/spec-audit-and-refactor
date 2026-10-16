@@ -14,6 +14,8 @@
 #   worktree.sh status [--check]              # list + state, base, ahead, change counts (JSON lines);
 #                                             # --check exits 1 if any is dirty or missing
 #   worktree.sh provision <worktree>          # provision an existing worktree (see below)
+#   worktree.sh rundir [--archive]            # persistent run dir <git common dir>/sar-run (JSON);
+#                                             # --archive renames it to sar-run.<UTC timestamp>
 #
 # Built-in defaults per layout (no config needed):
 #   Bare container (<root>/.bare + <root>/<branch>/ worktrees, e.g. <root>/main):
@@ -571,6 +573,30 @@ cmd_provision() {
   printf '{"worktree_path":"%s","provisioned":[%s]}\n' "$(json_escape "$wt")" "$PROVISIONED"
 }
 
+# The run dir holds a run's plan, specs, whitelists, logs, and state.json. It lives in the
+# git common dir: outside every work tree (no effect on baselines or scope gates), shared by
+# all worktrees, and kept across agent sessions.
+cmd_rundir() {
+  local archive=0 dir=$COMMON_DIR/sar-run target
+  while (($#)); do
+    case $1 in
+      --archive) archive=1; shift ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+  if ((archive)); then
+    [[ -d $dir ]] || die "no run dir to archive: $dir"
+    target=$dir.$(date -u +%Y%m%dT%H%M%SZ)
+    [[ -e $target ]] && die "archive target already exists: $target"
+    mv "$dir" "$target"
+    printf '{"archived":"%s"}\n' "$(json_escape "$target")"
+    return
+  fi
+  mkdir -p "$dir/logs"
+  printf '{"run_dir":"%s","logs":"%s","has_state":%s}\n' "$(json_escape "$dir")" \
+    "$(json_escape "$dir/logs")" "$([[ -f $dir/state.json ]] && echo true || echo false)"
+}
+
 usage() {
   # Prints the header comment up to the first non-comment line; $1 = max lines (0 = all).
   awk -v max="${1:-0}" 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print; if (max && NR > max) exit }' "$0"
@@ -578,7 +604,7 @@ usage() {
 
 main() {
   local cmd=${1:-}
-  [[ -n $cmd ]] || { usage 16 >&2; exit 2; }
+  [[ -n $cmd ]] || { usage 18 >&2; exit 2; }
   shift
   case $cmd in
     -h|--help) usage; exit 0 ;;
@@ -594,6 +620,7 @@ main() {
     list)   cmd_list ;;
     status) cmd_status "$@" ;;
     provision) cmd_provision "$@" ;;
+    rundir) cmd_rundir "$@" ;;
     *) die "unknown command: $cmd" ;;
   esac
 }

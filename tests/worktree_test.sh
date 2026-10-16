@@ -80,6 +80,22 @@ check_eq "default-branch worktree refused" "$rc" 2
 (cd "$std" && bash "$WT" list >/dev/null 2>&1); rc=$?
 check_eq "standard layout refused" "$rc" 2
 
+section "rundir"
+out=$(cd "$repo/sar/dirty-task" && bash "$W" rundir)
+rd=$(json_get '["run_dir"]' <<<"$out")
+check_eq "run dir in the git common dir" "$rd" "$(git -C "$repo/main" rev-parse --path-format=absolute --git-common-dir)/sar-run"
+check_eq "same run dir from the source worktree" "$(cd "$repo/main" && bash "$W" rundir | json_get '["run_dir"]')" "$rd"
+check "logs dir created" test -d "$rd/logs"
+check_eq "no state yet" "$(json_get '["has_state"]' <<<"$out")" False
+echo '{}' >"$rd/state.json"
+check_eq "state detected" "$(cd "$repo" && bash "$W" rundir | json_get '["has_state"]')" True
+check_eq "source worktree stays clean" "$(git -C "$repo/main" status --porcelain)" ""
+arch=$(cd "$repo" && bash "$W" rundir --archive | json_get '["archived"]')
+check "archived run dir keeps state" test -f "$arch/state.json"
+check "run dir gone after archive" test ! -e "$rd"
+(cd "$repo" && bash "$W" rundir --archive >/dev/null 2>&1); rc=$?
+check_eq "archive without a run dir: exit 2" "$rc" 2
+
 section "standard layout lifecycle still works (regression)"
 rm -r "$std/.agents"
 t=$(cd "$std" && bash "$W" create task-one 2>/dev/null | json_get '["worktree_path"]')
