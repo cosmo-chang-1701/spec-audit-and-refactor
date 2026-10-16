@@ -158,6 +158,7 @@ collect_warnings() {
   done
   [[ -z $agent ]] ||
     WARNINGS+=("agent config ($agent) moves into $BRANCH/: open agent sessions in $WT from now on; one opened at $REPO no longer loads it")
+  collect_skill_warnings
   while IFS= read -r venv; do
     venv=$(dirname "$venv")
     WARNINGS+=("virtualenv ${venv#"$REPO"/} contains absolute paths; recreate it after the move (e.g. uv sync)")
@@ -176,6 +177,28 @@ collect_warnings() {
     *) WARNINGS+=("core.fsmonitor is enabled; its daemon is stopped before converting") ;;
   esac
   return 0
+}
+
+# Personal skills directories that load a skill from $REPO, which breaks once its files move
+# to $WT: $REPO itself is a skill directory there (<dir>/<name>/SKILL.md), or a symlink there
+# resolves into $REPO (e.g. a skill installed with `ln -s <repo> ~/.claude/skills/<name>`).
+collect_skill_warnings() {
+  local real dir link target
+  real=$(realpath "$REPO")
+  for dir in "$HOME"/.claude/skills "$HOME"/.agents/skills "$HOME"/.codex/skills \
+             "$HOME"/.gemini/skills "$HOME"/.gemini/config/skills; do
+    [[ -d $dir ]] || continue
+    target=$(realpath "$dir")
+    [[ -f $REPO/SKILL.md && $(dirname "$real") == "$target" ]] &&
+      WARNINGS+=("$REPO is itself a skill in $dir; its SKILL.md moves to $WT/SKILL.md and agents no longer load it from $REPO (move the repo out of $dir, then: ln -s <new repo path>/$BRANCH $REPO)")
+    [[ $target == "$real" || $target == "$real"/* ]] && continue   # moves along with the repo
+    for link in "$dir"/*; do
+      [[ -L $link ]] || continue
+      target=$(realpath -m "$link")
+      [[ $target == "$real" || $target == "$real"/* ]] || continue
+      WARNINGS+=("skill symlink $link points into $REPO and breaks after converting; re-point it: ln -sfn $WT${target#"$real"} $link")
+    done
+  done
 }
 
 print_plan() {

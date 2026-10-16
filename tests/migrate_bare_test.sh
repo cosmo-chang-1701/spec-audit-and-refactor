@@ -26,6 +26,26 @@ check_eq "dry run is eligible" "$(json_get '["eligible"]' <<<"$plan")" True
 check_eq "dry run targets <repo>/main" "$(json_get '["after"]["source_worktree"]' <<<"$plan")" "$repo/main"
 check_eq "dry run changes nothing" "$(tree_of "$repo")" "$before"
 
+section "dry run warns about personal skill symlinks into the repo"
+repo=$(make_repo skill)
+home=$WORK/skill-home
+mkdir -p "$home/.claude/skills" "$home/.gemini/config/skills" "$home/.codex/skills" "$WORK/other"
+ln -s "$repo" "$home/.claude/skills/whole"
+ln -s "$repo/sub" "$home/.gemini/config/skills/nested"
+ln -s "$WORK/other" "$home/.codex/skills/unrelated"
+warnings=$(cd "$repo" && HOME=$home bash "$M" | json_get '["warnings"]')
+check "link to the repo root reported with its new target" \
+  grep -qF "ln -sfn $repo/main $home/.claude/skills/whole" <<<"$warnings"
+check "link into a subdirectory reported with its new target" \
+  grep -qF "ln -sfn $repo/main/sub $home/.gemini/config/skills/nested" <<<"$warnings"
+check "unrelated link not reported" bash -c "! grep -qF unrelated <<<\"\$1\"" _ "$warnings"
+git clone -q "$WORK/skill.up" "$home/.agents/skills/inplace" && touch "$home/.agents/skills/inplace/SKILL.md"
+warnings=$(cd "$home/.agents/skills/inplace" && HOME=$home bash "$M" | json_get '["warnings"]')
+check "repo that is itself a skill directory reported" \
+  grep -qF "$home/.agents/skills/inplace is itself a skill in $home/.agents/skills" <<<"$warnings"
+check_eq "plain repo outside the skills directories: no skill warning" \
+  "$(cd "$repo" && touch SKILL.md && HOME=$home bash "$M" | json_get '["warnings"]' | grep -c 'is itself a skill')" 0
+
 section "convert a dirty checkout (staged, unstaged, untracked, ignored, top-level main/)"
 repo=$(make_repo dirty)
 (cd "$repo"

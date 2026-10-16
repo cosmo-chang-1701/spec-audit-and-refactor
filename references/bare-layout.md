@@ -87,7 +87,8 @@ continue with the standard layout.
 2. Re-run `worktree.sh config`: `layout` is `bare`, `source_worktree` is `<repo>/<branch>`,
    and `default_base` is now `origin/<branch>`. Run every later Lead git/test command there.
 3. Re-read the agent docs (`AGENTS.md`, `CLAUDE.md`, …) from `source_worktree`; they moved.
-4. Tell the user what the warnings asked them to redo (venvs, Compose name), that agent
+4. Tell the user what the warnings asked them to redo (venvs, Compose name, skill symlinks
+   — give the `ln -sfn` commands; do not run them), that agent
    sessions should be opened in `<repo>/<branch>/` from now on, and that
    `bash SKILL_DIR/scripts/wt.sh` manages their own worktrees (`add`, `remove`, `status`).
 5. Continue the preflight (baseline, `default_base` check). Unpushed commits on the default
@@ -122,7 +123,10 @@ All renames stay inside `<repo>`; nothing is copied or written outside it.
 
 ### Warnings (listed in the plan, never block)
 Open editors and processes · agent config files that move (`CLAUDE.md`, `AGENTS.md`,
-`.claude/`, …) · virtualenvs with absolute paths · top-level Compose files without `name:` ·
+`.claude/`, …) · symlinks in the personal skills directories (`~/.claude/skills`,
+`~/.agents/skills`, `~/.codex/skills`, `~/.gemini/skills`, `~/.gemini/config/skills`) that
+point into the repo, with the `ln -sfn` command that re-points each · the repo itself being a
+skill directory in one of them (`SKILL.md` moves to `<branch>/`) · virtualenvs with absolute paths · top-level Compose files without `name:` ·
 git config values containing the old absolute path (not rewritten) · `core.fsmonitor`
 (its daemon is stopped) · missing `origin/HEAD` (current branch is used as default) ·
 stale worktree entries.
