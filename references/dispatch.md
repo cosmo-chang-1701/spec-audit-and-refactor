@@ -16,7 +16,8 @@ Use the subagent tool (`Agent` / `Task`), not a shell call:
 
 Dispatch runs in phase 2, so the Lead is the `lead_phase2` model (Sonnet 5.5 / high by
 default). If the current session is on another model, tell the user to switch with `/model`
-(and effort with `/effort`) rather than proceeding silently.
+(and effort with `/effort`) rather than proceeding silently. Exception: a `single`-session run
+([SKILL.md](../SKILL.md#sessions-and-context)) dispatches from the phase 1 Lead model.
 
 ## Codex CLI (ecosystem: codex)
 ```bash

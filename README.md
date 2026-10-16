@@ -58,8 +58,9 @@ verifies it again at close-out.
   directories symlinked into new worktrees so tests run there as they do in the source.
 - **Multi-runtime**: detects Claude Code, Codex CLI or Antigravity and picks Lead / Worker
   models accordingly.
-- **Lean Lead context**: the run is split into two sessions (plan, then execute) with its
-  state kept in a persistent run dir, and every test/lint/DoD command runs through
+- **Lean Lead context**: larger runs are split into two sessions (plan, then execute) with
+  their state kept in a persistent run dir — a single L/M-risk task stays in one session by
+  default — and every test/lint/DoD command runs through
   `run_logged.sh`, so only a one-line summary (plus a tail on failure) reaches the Lead.
 
 ## How it works
@@ -94,7 +95,9 @@ flowchart LR
    After approval the Lead writes `state.json` to the run dir and ends phase 1: run `/clear`,
    switch to the phase 2 Lead model, and invoke the skill with `resume`. The new session
    checks the baseline and base commit, reads only the plan and the current stage's specs,
-   and continues.
+   and continues. A small run (one task, risk L or M) skips the new session and continues
+   right away on the phase 1 Lead model; set `SAR_SESSION_SPLIT=always|never` or say so at
+   the checkpoint to change that.
 4. **Worktree + dispatch** — create one worktree per task on branch `sar/<slug>` and
    dispatch the stage's Workers in parallel (see [dispatch.md](references/dispatch.md)).
 5. **Gate** — run `check_scope.sh`, then re-run every DoD command (through
@@ -145,8 +148,9 @@ Review the worker's branch sar/fix-token-expiry before merging.
 ```
 
 A typical run pauses twice for your input: once to agree on audit scope, and once to
-approve the gap report, specs and execution plan. After that approval the Lead asks you to
-start a fresh session and continue with:
+approve the gap report, specs and execution plan. A single L/M-risk task then continues in
+the same session. For anything larger, the Lead asks you to start a fresh session and
+continue with:
 
 ```text
 /clear
@@ -205,6 +209,7 @@ For repos that deviate, add `.agents/spec-audit.json`:
 | `SAR_BRANCH_PREFIX` | Task branch prefix (default `sar/`) |
 | `SAR_STAGE_PREFIX` | Stage branch prefix (default `sar-stage/`) |
 | `SAR_ECOSYSTEM` | Force the runtime ecosystem (`claude`, `gemini`, `codex`) |
+| `SAR_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for multi-task or H-risk runs), `always`, `never` |
 | `SAR_LOG_TAIL` | Lines of log `run_logged.sh` prints on failure (default `40`) |
 
 See `scripts/worktree.sh --help` for the full resolution rules.

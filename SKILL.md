@@ -40,16 +40,26 @@ Claude Code session may also have `GEMINI_API_KEY` set). Defaults:
 | Fallback | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
 
 Overrides: `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
-`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`.
+`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`, and `SAR_SESSION_SPLIT` (see
+[Sessions and context](#sessions-and-context)).
 If you are not running as the Lead model of the current phase, tell the user how to switch
-(`/model`, `/effort` in Claude Code); do not silently continue.
+(`/model`, `/effort` in Claude Code); do not silently continue. Exception: a `single`-session
+run keeps the phase 1 Lead model for phase 2.
 
 ## Sessions and context
-The run is split into two sessions so the Lead's context stays small:
 - **Phase 1** — steps 0–2 (preflight, audit, spec, checkpoint) on the phase 1 Lead model.
-- **Phase 2** — [Resume](#resume-phase-2) then steps 3–6 in a **fresh session** on the
-  phase 2 Lead model. It reads only the plan, the state, and the current stage's specs —
-  specs are self-contained by design, so nothing else from phase 1 is needed.
+- **Phase 2** — steps 3–6. In a `split` run it starts with [Resume](#resume-phase-2) in a
+  **fresh session** on the phase 2 Lead model, reading only the plan, the state, and the
+  current stage's specs — specs are self-contained by design, so nothing else from phase 1
+  is needed. In a `single` run it continues in the same session on the phase 1 Lead model.
+
+Which one, from `session_split` (`detect_runtime.sh`, env `SAR_SESSION_SPLIT`):
+- `auto` (default) — `single` for a small run: exactly one task with risk L or M. `split`
+  for two or more tasks (including `staged`) or any H-risk task, where a fresh session keeps
+  the Lead's context small.
+- `always` → `split`; `never` → `single`.
+
+Show the result in the checkpoint report; an explicit request from the user there wins.
 
 Run state lives in the **run dir**, `bash SKILL_DIR/scripts/worktree.sh rundir` →
 `<git common dir>/sar-run/`: outside every work tree (baselines and scope gates never see it),
@@ -64,7 +74,7 @@ not explain a failure. Never let a full test suite's output into the conversatio
 ## Workflow
 
 ### 0. Preflight
-1. `detect_runtime.sh` as above; note the `worker` block.
+1. `detect_runtime.sh` as above; note the `worker` block and `session_split`.
 2. `bash SKILL_DIR/scripts/worktree.sh config` — the detected layout and its defaults
    (see [Worktree layout](#worktree-layout)); no per-repo setup is needed. Note
    `source_worktree`, `default_base`, `provision`, `max_parallel`, and `offer_bare_migration`.
@@ -126,14 +136,17 @@ not explain a failure. Never let a full test suite's output into the conversatio
   [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report). In `staged` mode
   the approval must explicitly cover the inter-stage local commits and merges (no push).
 - **Phase boundary** — after approval, write `<run dir>/state.json`
-  ([execution-plan.md §7](references/execution-plan.md#7-run-state)) with `phase: 2`, then end
-  phase 1 by telling the user:
-  > Plan approved and saved to `<run dir>`. Run `/clear`, switch to the phase 2 Lead
-  > (`/model <lead_phase2.model>`, `/effort <lead_phase2.effort>`), then invoke this skill
-  > with `resume`.
+  ([execution-plan.md §7](references/execution-plan.md#7-run-state)) with `phase: 2` and the
+  agreed `session`, then:
+  - `split` — end phase 1 by telling the user:
+    > Plan approved and saved to `<run dir>`. Run `/clear`, switch to the phase 2 Lead
+    > (`/model <lead_phase2.model>`, `/effort <lead_phase2.effort>`), then invoke this skill
+    > with `resume`.
 
-  (Codex / Antigravity: start a new session with the `lead_phase2` model.) Stay in the same
-  session only for a single L-risk task and only if the user asks to.
+    (Codex / Antigravity: start a new session with the `lead_phase2` model.)
+  - `single` — tell the user the plan is saved to `<run dir>` and the run continues in this
+    session, then go straight to step 3 without switching models. If the session is lost,
+    `resume` still works from `state.json`.
 
 ### Resume (phase 2)
 Entered when the skill is invoked with `resume`, or when preflight finds a run in progress

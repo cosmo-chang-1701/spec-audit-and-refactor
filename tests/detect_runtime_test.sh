@@ -33,6 +33,10 @@ check_eq "SAR_LEAD2_MODEL" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" cl
 check_eq "SAR_LEAD2_EFFORT" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" medium
 check_eq "SAR_LEAD_EFFORT leaves phase 2 alone" "$(json_get '["lead_phase2"]["effort"]' <<<"$(run SAR_LEAD_EFFORT=max)")" high
 check_eq "SAR_WORKER_MODEL sets the dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" haiku
+check_eq "session split defaults to auto" "$(json_get '["session_split"]' <<<"$out")" auto
+check_eq "SAR_SESSION_SPLIT" "$(json_get '["session_split"]' <<<"$(run SAR_SESSION_SPLIT=never)")" never
+run SAR_SESSION_SPLIT=bogus >/dev/null 2>&1; rc=$?
+check_eq "invalid SAR_SESSION_SPLIT: exit 2" "$rc" 2
 
 section "detection"
 check_eq "--agent wins over runtime markers" \

@@ -53,6 +53,11 @@ Lead the report with what needs a human decision; put the detail last. Always in
 - **DoD baseline**: class counts from the [DoD dry run](worker-spec-template.md#dod-dry-run).
 - **Critic**: accepted/rejected counts, or `skipped` ([plan-critic.md](plan-critic.md)).
 
+Below the matrix, one line on the session plan
+([SKILL.md](../SKILL.md#sessions-and-context)), so the user can override it with the approval:
+`Session: single (auto — one L/M task)` or `Session: split (auto — 3 tasks)`; the source is
+`auto`, `always`, `never` (from `SAR_SESSION_SPLIT`) or `user`.
+
 **② Decisions for you** — one bullet each, empty section if none: every H-risk task, every
 rejected H Critic finding (with the reason), every `FAIL-UNRELATED` DoD, every whitelist
 that reaches beyond the files the findings name, and every unresolved `POSSIBLE` overlap.
@@ -126,6 +131,7 @@ It records facts only — decisions stay in `plan.md` and the specs.
 ```json
 {
   "phase": 2,
+  "session": "split",
   "approved_at": "2026-10-16T09:30:00Z",
   "approval": "Plan as shown; inter-stage local commits and merges approved (no push).",
   "source_worktree": "/abs/path/to/main",
@@ -145,6 +151,8 @@ It records facts only — decisions stay in `plan.md` and the specs.
 }
 ```
 
+- `session`: `single` (phase 2 continued in the phase 1 session) or `split` (fresh session).
+  A resumed session always runs on the `lead_phase2` model, whichever it was.
 - Stage status: `pending` → `running` → `integrated` (or `deferred`).
 - Task status: `pending` → `dispatched` → `in-review` (with `round`) → `approved` →
   `committed`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the

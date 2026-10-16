@@ -55,7 +55,8 @@ Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 
   symlink 連結 `.venv` 目錄，讓測試能像在原始 checkout 中一樣執行。
 - **支援多種執行環境**：自動偵測 Claude Code、Codex CLI 或 Antigravity，並據此選擇 Lead /
   Worker 模型。
-- **精簡 Lead 的 context**：整個流程分成兩個 session（先規劃、再執行），狀態保存在持久的 run dir；
+- **精簡 Lead 的 context**：較大的流程分成兩個 session（先規劃、再執行），狀態保存在持久的 run dir
+  （單一 L/M 風險任務預設留在同一個 session）；
   所有 test / lint / DoD 指令都透過 `run_logged.sh` 執行，Lead 只會看到一行摘要（失敗時附上最後幾行）。
 
 ## 運作方式
@@ -87,7 +88,8 @@ flowchart LR
    風險與共用資源），再附完整 spec。**使用者核准前不會派出任何 Worker。**
    核准後，Lead 把 `state.json` 寫入 run dir 並結束 phase 1：執行 `/clear`、切換到 phase 2 的
    Lead 模型，再以 `resume` 呼叫本 skill。新的 session 會先核對基準狀態與 base commit，只讀取
-   執行計畫與當前階段的 spec，然後接續執行。
+   執行計畫與當前階段的 spec，然後接續執行。小型流程（單一任務、風險 L 或 M）則不換 session，
+   直接以 phase 1 的 Lead 模型繼續；可設定 `SAR_SESSION_SPLIT=always|never`，或在核准時說明來改變。
 4. **Worktree + 派工**：為每個任務在 `sar/<slug>` 分支上建立 worktree，並平行派出該階段的
    Worker（詳見 [dispatch.md](references/dispatch.md)）。
 5. **檢查**：執行 `check_scope.sh`，再透過 `run_logged.sh` 重新執行所有 DoD 指令，全部都必須通過。
@@ -135,7 +137,8 @@ ln -s ~/.agents/skills/spec-audit-and-refactor ~/.claude/skills/spec-audit-and-r
 ```
 
 一般流程會停下來等你兩次：一次是議定稽核範圍，一次是核准缺口報告、spec 與執行計畫。
-核准之後，Lead 會請你開一個新的 session 接續：
+核准之後，單一 L/M 風險任務會直接在同一個 session 繼續；規模更大時，Lead 會請你開一個新的
+session 接續：
 
 ```text
 /clear
@@ -192,6 +195,7 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | `SAR_BRANCH_PREFIX` | 任務分支前綴（預設 `sar/`） |
 | `SAR_STAGE_PREFIX` | 階段分支前綴（預設 `sar-stage/`） |
 | `SAR_ECOSYSTEM` | 強制指定執行環境生態系（`claude`、`gemini`、`codex`） |
+| `SAR_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅多任務或 H 風險時）、`always`、`never` |
 | `SAR_LOG_TAIL` | `run_logged.sh` 失敗時印出的 log 行數（預設 `40`） |
 
 完整的解析規則請執行 `scripts/worktree.sh --help`。

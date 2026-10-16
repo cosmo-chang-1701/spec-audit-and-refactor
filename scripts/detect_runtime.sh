@@ -15,6 +15,8 @@
 # phase 2 (dispatch, gate, review, close-out) in a fresh session; "worker" implements.
 # Per-field overrides: SAR_LEAD_MODEL, SAR_LEAD_EFFORT, SAR_LEAD2_MODEL, SAR_LEAD2_EFFORT,
 # SAR_WORKER_MODEL, SAR_WORKER_EFFORT.
+# Session split: SAR_SESSION_SPLIT = auto (default: split only multi-task or H-risk runs),
+# always, or never; reported as "session_split".
 # Output: a single JSON object on stdout.
 set -euo pipefail
 
@@ -50,10 +52,16 @@ while (($#)); do
   case $1 in
     --agent) [[ $# -ge 2 ]] || die "--agent needs a value"; agent_flag=$2; shift 2 ;;
     --agent=*) agent_flag=${1#*=}; shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
+
+session_split=${SAR_SESSION_SPLIT:-auto}
+case $session_split in
+  auto|always|never) ;;
+  *) die "SAR_SESSION_SPLIT must be one of: auto always never" ;;
+esac
 
 ecosystem="" detected_by=""
 if [[ -n $agent_flag ]]; then
@@ -107,8 +115,9 @@ worker_model=${SAR_WORKER_MODEL:-$worker_model}
 worker_effort=${SAR_WORKER_EFFORT:-$worker_effort}
 [[ -n ${SAR_WORKER_MODEL:-} ]] && worker_alias=$SAR_WORKER_MODEL
 
-printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s"},"lead_phase2":{"model":"%s","effort":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"}}\n' \
+printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s"},"lead_phase2":{"model":"%s","effort":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"},"session_split":"%s"}\n' \
   "$ecosystem" "$(json_escape "$detected_by")" \
   "$(json_escape "$lead_model")" "$(json_escape "$lead_effort")" \
   "$(json_escape "$lead2_model")" "$(json_escape "$lead2_effort")" \
-  "$(json_escape "$worker_model")" "$(json_escape "$worker_effort")" "$(json_escape "$worker_alias")"
+  "$(json_escape "$worker_model")" "$(json_escape "$worker_effort")" "$(json_escape "$worker_alias")" \
+  "$session_split"
