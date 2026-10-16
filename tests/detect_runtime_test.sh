@@ -15,9 +15,15 @@ check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" claude-son
 check_eq "worker effort" "$(json_get '["worker"]["effort"]' <<<"$out")" medium
 check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" sonnet
 
-section "other ecosystems: phase 2 lead = lead"
+section "gemini defaults"
 AGENT=gemini; out=$(run)
-check_eq "gemini" "$(json_get '["lead_phase2"]' <<<"$out")" "$(json_get '["lead"]' <<<"$out")"
+check_eq "lead model" "$(json_get '["lead"]["model"]' <<<"$out")" gemini-4-argon-high
+check_eq "phase 2 lead model" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" gemini-3.8-flash-high
+check_eq "phase 2 lead effort" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" high
+check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" gemini-3.8-flash-high
+check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" gemini-3.8-flash-high
+
+section "codex: phase 2 lead = lead"
 AGENT=codex; out=$(run)
 check_eq "codex" "$(json_get '["lead_phase2"]' <<<"$out")" "$(json_get '["lead"]' <<<"$out")"
 

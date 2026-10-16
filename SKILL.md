@@ -35,7 +35,7 @@ Claude Code session may also have `GEMINI_API_KEY` set). Defaults:
 | Ecosystem | Lead · phase 1 (`lead`) | Lead · phase 2 (`lead_phase2`) | Worker |
 | :--- | :--- | :--- | :--- |
 | Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini (Antigravity) | `gemini-3.8-flash-high` · high | same as phase 1 | `gemini-3.8-flash-high` · high |
+| Gemini (Antigravity) | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
 | Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium |
 | Fallback | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
 

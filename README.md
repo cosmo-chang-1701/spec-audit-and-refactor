@@ -161,7 +161,7 @@ Commits, pushes, PRs and worktree removal are always confirmed with you first.
 | Ecosystem | Lead · phase 1 (audit, spec, critic) | Lead · phase 2 (dispatch, gate, review) | Worker |
 | :--- | :--- | :--- | :--- |
 | Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini (Antigravity) | `gemini-3.8-flash-high` · high | same as phase 1 | `gemini-3.8-flash-high` · high |
+| Gemini (Antigravity) | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
 | Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium |
 
 Override with `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,

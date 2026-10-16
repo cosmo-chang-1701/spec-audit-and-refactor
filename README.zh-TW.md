@@ -150,7 +150,7 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 | 生態系 | Lead · phase 1（稽核、spec、Critic） | Lead · phase 2（派工、檢查、審查） | Worker |
 | :--- | :--- | :--- | :--- |
 | Claude（Claude Code） | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini（Antigravity） | `gemini-3.8-flash-high` · high | 與 phase 1 相同 | `gemini-3.8-flash-high` · high |
+| Gemini（Antigravity） | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
 | Codex | `~/.codex/config.toml` 中的 `model` · high | 與 phase 1 相同 | 同一模型 · medium |
 
 可用 `SAR_LEAD_MODEL`、`SAR_LEAD_EFFORT`、`SAR_LEAD2_MODEL`、`SAR_LEAD2_EFFORT`、

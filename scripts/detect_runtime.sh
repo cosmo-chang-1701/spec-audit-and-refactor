@@ -88,8 +88,8 @@ case $ecosystem in
     worker_alias=sonnet ;;
   gemini)
     # Antigravity encodes effort in the model id (see `agy models`).
-    lead_model=gemini-3.8-flash-high   lead_effort=high
-    lead2_model=$lead_model            lead2_effort=$lead_effort
+    lead_model=gemini-4-argon-high     lead_effort=high
+    lead2_model=gemini-3.8-flash-high  lead2_effort=high
     worker_model=gemini-3.8-flash-high worker_effort=high
     worker_alias=gemini-3.8-flash-high ;;
   codex)
