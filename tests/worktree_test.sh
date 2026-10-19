@@ -130,4 +130,58 @@ check_eq "status lists task and stage" "$(cd "$std" && bash "$W" status | python
 check_eq "remove stage and task" "$rc" 0
 check_eq "no SAR worktrees left" "$(cd "$std" && bash "$W" list)" ""
 
+section "remove: docker compose down"
+# Fake docker: logs "<cwd>|<args>", prints $DOCKER_ROWS for `ps`, exits $DOCKER_DOWN_RC for `compose`.
+mkdir -p "$WORK/dockershim"
+cat >"$WORK/dockershim/docker" <<'SH'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$PWD" "$*" >>"$DOCKER_LOG"
+case $1 in
+  ps) cat "$DOCKER_ROWS" ;;
+  compose) exit "${DOCKER_DOWN_RC:-0}" ;;
+esac
+SH
+chmod +x "$WORK/dockershim/docker"
+export DOCKER_LOG=$WORK/docker.log DOCKER_ROWS=$WORK/docker.rows
+dremove() { (cd "$repo" && PATH="$WORK/dockershim:$PATH" bash "$W" remove "$@"); }
+new_task() { (cd "$repo" && bash "$W" create "$1" 2>/dev/null | json_get '["worktree_path"]'); }
+
+t=$(new_task compose-own)
+printf 'compose-own\t%s\ncompose-own\t%s/svc\nother\t%s/main\n' "$t" "$t" "$repo" >"$DOCKER_ROWS"
+: >"$DOCKER_LOG"
+dremove compose-own >/dev/null 2>&1; rc=$?
+check_eq "remove with own compose project exits 0" "$rc" 0
+check_eq "down run once, in the project's dir, without -v" "$(grep -c '|compose' "$DOCKER_LOG")" 1
+check "down targets the project" grep -qxF "$t|compose -p compose-own down" "$DOCKER_LOG"
+check "worktree removed" test ! -e "$t"
+
+t=$(new_task compose-shared)
+printf 'shared\t%s\nshared\t%s/main\n' "$t" "$repo" >"$DOCKER_ROWS"
+: >"$DOCKER_LOG"
+err=$(dremove compose-shared 2>&1 >/dev/null)
+check "shared project: no down" test "$(grep -c '|compose' "$DOCKER_LOG")" -eq 0
+check "shared project: reported as left running" grep -q "left running" <<<"$err"
+check "shared project: worktree still removed" test ! -e "$t"
+
+t=$(new_task compose-off)
+printf 'off\t%s\n' "$t" >"$DOCKER_ROWS"
+: >"$DOCKER_LOG"
+SAR_COMPOSE_DOWN=0 dremove compose-off >/dev/null 2>&1
+check_eq "SAR_COMPOSE_DOWN=0: docker not called" "$(wc -l <"$DOCKER_LOG")" 0
+
+t=$(new_task compose-dirty)
+printf 'dirty\t%s\n' "$t" >"$DOCKER_ROWS"
+echo change >>"$t/a.txt"
+: >"$DOCKER_LOG"
+dremove compose-dirty >/dev/null 2>&1; rc=$?
+check_eq "dirty worktree refused" "$rc" 2
+check_eq "dirty worktree: docker not called" "$(wc -l <"$DOCKER_LOG")" 0
+
+printf 'dirty\t%s\n' "$t" >"$DOCKER_ROWS"
+: >"$DOCKER_LOG"
+DOCKER_DOWN_RC=1 dremove compose-dirty --force >/dev/null 2>&1; rc=$?
+check_eq "failed down does not block remove" "$rc" 0
+check "failed down: down was attempted" grep -q '|compose -p dirty down' "$DOCKER_LOG"
+check "failed down: worktree removed" test ! -e "$t"
+
 finish

@@ -50,6 +50,12 @@
 #
 # The fork-point commit is saved to <worktree git dir>/sar-base so check_scope.sh
 # can diff against it later.
+#
+# Before removing a worktree, `remove` runs `docker compose down` (volumes kept) for each
+# Compose project whose containers were all started from inside it, e.g. the dependency
+# services `docker compose run` leaves behind. A project that also has containers started
+# elsewhere (a name shared with the main checkout) is left running. Disable with
+# SAR_COMPOSE_DOWN=0; without docker or a reachable daemon this step is skipped.
 set -euo pipefail
 
 readonly BRANCH_PREFIX=${SAR_BRANCH_PREFIX:-sar/}
@@ -343,6 +349,30 @@ prune_empty_parents() {
   done
 }
 
+# compose_down <worktree>: stops Compose projects started only from inside the worktree.
+compose_down() {
+  local wt=$1 rows project dir
+  [[ ${SAR_COMPOSE_DOWN:-1} != 0 ]] && command -v docker >/dev/null || return 0
+  rows=$(docker ps -a --filter label=com.docker.compose.project \
+    --format '{{.Label "com.docker.compose.project"}}{{"\t"}}{{.Label "com.docker.compose.project.working_dir"}}' \
+    2>/dev/null) || return 0
+  # "project<TAB>1" if the container's working dir is inside the worktree, else "project<TAB>0".
+  rows=$(awk -F'\t' -v wt="$wt" '$1 != "" { print $1 "\t" ($2 == wt || index($2, wt "/") == 1) "\t" $2 }' <<<"$rows")
+  while IFS= read -r project; do
+    [[ -n $project ]] || continue
+    if awk -F'\t' -v p="$project" '$1 == p && $2 == 0 { found = 1 } END { exit !found }' <<<"$rows"; then
+      warn "compose project '$project' also has containers outside $wt; left running"
+      continue
+    fi
+    dir=$(awk -F'\t' -v p="$project" '$1 == p { print $3; exit }' <<<"$rows")
+    if (cd "$dir" && docker compose -p "$project" down) >&2; then
+      printf 'stopped compose project: %s\n' "$project" >&2
+    else
+      warn "docker compose down failed for project '$project'; removing the worktree anyway"
+    fi
+  done < <(awk -F'\t' '$2 == 1 { print $1 }' <<<"$rows" | sort -u)
+}
+
 emit_json() {
   printf '{"layout":"%s","repo":"%s","common_dir":"%s","main_worktree":"%s","worktree_path":"%s","branch":"%s","resolved_by":"%s","path_style":"%s"%s}\n' \
     "$LAYOUT" "$(json_escape "$REPO_NAME")" "$(json_escape "$COMMON_DIR")" "$(json_escape "$MAIN_WORKTREE")" \
@@ -484,6 +514,7 @@ cmd_remove() {
     printf '%s\n' "$dirty" >&2
     die "worktree has uncommitted changes: $path (re-run with --force to discard)"
   fi
+  compose_down "$path"
   if ((force)); then git worktree remove --force "$path"; else git worktree remove "$path"; fi
   printf 'removed worktree: %s\n' "$path" >&2
   [[ $PATH_STYLE == branch ]] && prune_empty_parents "$path"
