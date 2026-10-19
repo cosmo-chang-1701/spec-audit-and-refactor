@@ -6,15 +6,18 @@
 ![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25.svg)
 ![Agents: Claude Code · Codex · Antigravity](https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity-blueviolet.svg)
 
-An agent skill that turns "audit this codebase and fix what you find" into a
-**Lead-Worker workflow**: a Lead agent audits read-only and writes whitelisted specs,
-Worker subagents implement them in isolated git worktrees, and every result passes a
-scope gate, a Definition-of-Done gate, and a diff review before anything is merged.
+Stop letting a single AI agent "quickly fix" things across your repository, touch unrelated
+files, and grade its own homework.
+
+**Spec Audit & Refactor** turns codebase audits and multi-file refactoring into a
+**disciplined, parallel Lead-Worker pipeline** — giving you **strict file-scope guarantees,
+independent code review, parallel subagent speed, and a lean context window** while keeping
+your main checkout 100% untouched.
 
 ## Table of contents
 
 - [Why](#why)
-- [Features](#features)
+- [Key benefits](#key-benefits)
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -28,42 +31,48 @@ scope gate, a Definition-of-Done gate, and a diff review before anything is merg
 
 ## Why
 
-Letting one agent both review and edit code makes it easy for "quick fixes" to slip
-past review and for changes to sprawl across unrelated files. This skill separates the
-roles:
+When one agent both audits and edits your code in a single checkout, changes sprawl across
+unrelated files, tests flood the context window, and self-reviews miss subtle regressions.
+
+| Common single-agent pain point | With Spec Audit & Refactor |
+| :--- | :--- |
+| **Scope creep** — agent edits "just one more file" outside the task | **Hard scope gate** — `check_scope.sh` rejects any change outside the task's file whitelist |
+| **Self-grading bias** — the same agent writes and approves its own code | **Strict role separation** — the Lead never edits code; Workers never approve or merge their own work |
+| **Dirty working tree** — half-baked edits pollute your active checkout | **Isolated git worktrees** — your main checkout is checksummed before and after, remaining completely untouched |
+| **Context bloat & high token cost** — test logs and multi-file edits exhaust context | **Lean context & smart routing** — test outputs are summarized to 1 line, large runs split across sessions, and Workers use faster models |
+| **Slow sequential fixes** — fixing 5 issues takes 5× the wall-clock time | **Parallel & staged execution** — independent tasks run simultaneously; dependent tasks run in verified stages |
+
+To enforce this, the skill strictly separates responsibilities:
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
 | **Lead** (reviewer / orchestrator) | Read and search code, run tests and linters, write specs and reviews, manage worktrees | Edit application files — anywhere |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its own worktree, until the DoD passes | Touch non-whitelisted files, commit, push, or leave its worktree |
 
-The main checkout stays untouched: the Lead records a baseline before starting and
-verifies it again at close-out.
+## Key benefits
 
-## Features
+### 🛡️ Zero unintended blast radius
+- **Guaranteed clean main checkout**: The Lead records a cryptographic baseline of your working tree before starting and verifies it at close-out.
+- **Enforced file whitelists**: Every task gets an explicit glob whitelist (`<slug>.wl`). `check_scope.sh` blocks committed, staged, unstaged, or untracked changes outside that boundary.
+- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs; commits, pushes, PRs, and worktree cleanup always require your explicit consent.
 
-- **Read-only audit** producing a gap report with `file:line`, severity, evidence and a
-  proposed fix for every finding.
-- **Whitelisted specs** with an explicit Definition of Done, plus repo rules pulled from
-  `AGENTS.md` / `CLAUDE.md`, so Workers start with the context they need.
-- **Isolated git worktrees** per task, with the fork point recorded for exact diffs.
-- **Scope gate** (`check_scope.sh`) that rejects any change outside the whitelist —
-  committed, staged, unstaged or untracked.
-- **Parallel execution**: independent tasks all run at once; related tasks run in
-  dependency-ordered stages, each stage built on the integrated result of the previous one.
-- **Bounded review loop**: at most three review rounds per task, then escalation to the user.
-- **Layout-aware**: works with standard repos and the bare-repo worktree layout, and can
-  convert a repo to the bare layout in place (dry run first, automatic rollback on failure).
-  Agent config (`.claude/`, `AGENTS.md`, …) gets symlinks at the container root, so agent
-  CLIs started there still load the project's skills.
-- **Auto-provisioning**: gitignored `.env` / `.env.*` files are copied and `.venv`
-  directories symlinked into new worktrees so tests run there as they do in the source.
-- **Multi-runtime**: detects Claude Code, Codex CLI or Antigravity and picks Lead / Worker
-  models accordingly.
-- **Lean Lead context**: larger runs are split into two sessions (plan, then execute) with
-  their state kept in a persistent run dir — a single L/M-risk task stays in one session by
-  default — and every test/lint/DoD command runs through
-  `run_logged.sh`, so only a one-line summary (plus a tail on failure) reaches the Lead.
+### 🔍 Higher code quality through adversarial verification
+- **Evidence-based read-only audit**: Produces a structured gap report with `file:line`, severity, concrete evidence, and proposed fixes before a single line of code is touched.
+- **Pre-flight DoD validation & Plan Critic**: Definition-of-Done commands are dry-run ahead of time to catch broken tests, and complex/high-risk plans are challenged by a read-only Plan Critic before you review them.
+- **Bounded independent code review**: Every Worker's diff is verified against its DoD and reviewed line-by-line by the Lead (capped at 3 rounds before escalating to you, preventing infinite agent loops).
+
+### ⚡ Faster delivery with safe parallelism
+- **Concurrent Worker subagents**: Independent tasks run in parallel inside separate git worktrees; dependent tasks run in dependency-ordered stages (`staged` mode), each building on the verified, integrated result of the previous stage.
+- **Ready-to-test worktrees out of the box**: Gitignored `.env` / `.env.*` files are automatically copied and `.venv` directories symlinked into every new worktree so test suites work immediately without manual setup.
+- **Self-contained Worker context**: Repo rules from `AGENTS.md` / `CLAUDE.md` and project-specific pitfalls are baked directly into each spec so Workers succeed on the first try.
+
+### 💡 Lean context window & lower token costs
+- **1-line log compression**: Every test, linter, and build runs through `run_logged.sh`, returning a single summary line (plus log tail only on failure) so verbose test suites never pollute the Lead's context.
+- **Two-phase session splitting**: Multi-task or high-risk runs persist state in `<git-common-dir>/sar-run/` and split between planning (Phase 1) and execution (Phase 2), keeping context sharp and focused.
+- **Right-sized model routing**: Automatically pairs top-tier reasoning models for Phase 1 auditing/spec-writing with faster, cost-effective models for Phase 2 orchestration and Worker implementation across Claude Code, Codex CLI, and Antigravity.
+
+### 🔧 Zero-config & layout-aware
+- **Works with your repo as-is**: Automatically adapts to standard git checkouts and bare-repo worktree layouts (`<root>/.bare` + `<root>/main/`), with optional in-place migration (`migrate_to_bare.sh`, dry-run first + automatic rollback) and root-level agent config symlinks.
 
 ## How it works
 

@@ -6,15 +6,15 @@
 ![Shell: Bash](https://img.shields.io/badge/shell-bash-4EAA25.svg)
 ![Agents: Claude Code · Codex · Antigravity](https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity-blueviolet.svg)
 
-一個 agent skill，把「稽核這個 codebase 並修正發現的問題」轉成 **Lead-Worker 工作流程**：
-Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 在各自隔離的 git worktree
-中實作，每個結果都必須通過範圍檢查（scope gate）、完成定義檢查（Definition-of-Done gate）
-與 diff 審查，才會被合併。
+別再讓單一 AI agent 在你的 repo 裡「順手修一下」——不僅容易改到不相關的檔案，還自己寫 code 自己審查。
+
+**Spec Audit & Refactor** 將程式碼稽核與跨檔案重構轉化為**嚴謹、可平行的 Lead-Worker 工作流程**：
+為你帶來**嚴格的變更範圍保護、獨立的程式碼審查、平行 subagent 的開發速度，以及極致精簡的 context 消耗**，同時確保你原本的工作目錄（main checkout）100% 不受污染。
 
 ## 目錄
 
 - [為什麼需要它](#為什麼需要它)
-- [功能特色](#功能特色)
+- [使用本專案的好處](#使用本專案的好處)
 - [運作方式](#運作方式)
 - [系統需求](#系統需求)
 - [安裝](#安裝)
@@ -28,37 +28,47 @@ Lead agent 以唯讀方式稽核並撰寫附白名單的 spec，Worker subagent 
 
 ## 為什麼需要它
 
-讓同一個 agent 既審查又修改程式碼，很容易讓「順手修一下」繞過審查，也容易讓變更擴散到不相關
-的檔案。這個 skill 將兩種角色分開：
+當同一個 agent 在單一工作目錄中同時負責「找問題」與「改程式碼」時，變更很容易擴散到不相關的檔案、測試輸出會塞爆 context 視窗，且「球員兼裁判」往往會漏掉細微的 regression。
+
+| 單一 Agent 常見痛點 | 使用 Spec Audit & Refactor 的好處 |
+| :--- | :--- |
+| **變更範圍失控** — agent「順手多改幾個檔案」，改動超出預期 | **嚴格的白名單防線** — `check_scope.sh` 會拒絕任何超出任務白名單的檔案變更 |
+| **球員兼裁判** — 同一個 agent 自己寫 code 又自己說沒問題 | **職責徹底分離** — Lead 絕對不改程式碼；Worker 絕對不能自己核准或合併變更 |
+| **弄髒工作目錄** — 改到一半的實驗或修補直接污染你正在開發的 checkout | **隔離的 Git Worktree** — 主工作目錄在執行前後都會驗證雜湊基準，全程保持乾淨 |
+| **Context 爆炸與高昂 Token 成本** — 大量測試 log 與多檔案修改迅速耗盡 context | **精簡 Context 與智慧模型分配** — 測試輸出濃縮為 1 行摘要、大型任務跨 session 切分，並為 Worker 配置高性價比模型 |
+| **循序修改耗時漫長** — 修 5 個問題就得花 5 倍的等待時間 | **平行與分階段執行** — 獨立任務同時平行處理；相依任務則依序分階段整合驗證 |
+
+為了落實這些保障，本 skill 嚴格劃分兩種角色：
 
 | 角色 | 可以 | 不可以 |
 | :--- | :--- | :--- |
 | **Lead**（審查者／協調者） | 閱讀與搜尋程式碼、執行測試與 linter、撰寫 spec 與審查意見、管理 worktree | 在任何地方修改應用程式檔案 |
 | **Worker**（subagent） | 在自己的 worktree 內修改白名單涵蓋的檔案，直到 DoD 通過 | 修改白名單以外的檔案、commit、push，或離開自己的 worktree |
 
-主要 checkout 全程不會被動到：Lead 開始前會記錄基準狀態，並在收尾時再次驗證。
+## 使用本專案的好處
 
-## 功能特色
+### 🛡️ 零意外波及（絕對的變更邊界與安全性）
+- **主工作目錄 100% 不受影響**：Lead 在開始前會記錄主 checkout 的狀態基準（baseline），並在收尾時再次比對確認。
+- **強制執行的檔案白名單**：每個任務都有專屬的白名單（`<slug>.wl`），`check_scope.sh` 會攔截任何超出範圍的變更（包含已 commit、已 stage、未 stage 或未追蹤檔案）。
+- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker；所有 commit、push、開 PR 與刪除 worktree 都必須先經過你的明確同意。
 
-- **唯讀稽核**：產出缺口報告（gap report），每項發現都附 `file:line`、嚴重程度、證據與建議修正。
-- **附白名單的 spec**：明確的完成定義（Definition of Done），並從 `AGENTS.md` / `CLAUDE.md`
-  擷取 repo 規則，讓 Worker 一開始就掌握所需的脈絡。
-- **隔離的 git worktree**：每個任務一個 worktree，並記錄分岔點以產生精確的 diff。
-- **範圍檢查**（`check_scope.sh`）：任何超出白名單的變更都會被拒絕——無論是已 commit、已 stage、
-  未 stage 或未追蹤的檔案。
-- **平行執行**：互相獨立的任務同時執行；有關聯的任務依相依順序分階段執行，每個階段都建立在前一
-  階段整合後的結果之上。
-- **有上限的審查迴圈**：每個任務最多三輪審查，超過則交由使用者決定。
-- **感知 worktree 佈局**：支援一般 repo 與 bare-repo worktree 佈局，並可就地將 repo 轉換為
-  bare 佈局（先 dry run，失敗時自動 rollback）。Agent 設定（`.claude/`、`AGENTS.md` 等）會在
-  容器根目錄建立 symlink，在根目錄啟動 agent CLI 時仍能載入專案的 skill。
-- **自動配置環境**：新的 worktree 會自動複製被 gitignore 的 `.env` / `.env.*` 檔案，並以
-  symlink 連結 `.venv` 目錄，讓測試能像在原始 checkout 中一樣執行。
-- **支援多種執行環境**：自動偵測 Claude Code、Codex CLI 或 Antigravity，並據此選擇 Lead /
-  Worker 模型。
-- **精簡 Lead 的 context**：較大的流程分成兩個 session（先規劃、再執行），狀態保存在持久的 run dir
-  （單一 L/M 風險任務預設留在同一個 session）；
-  所有 test / lint / DoD 指令都透過 `run_logged.sh` 執行，Lead 只會看到一行摘要（失敗時附上最後幾行）。
+### 🔍 雙重把關帶來更高品質的程式碼
+- **具證據力的唯讀稽核**：動手修改前，先產出包含 `file:line`、嚴重程度、具體證據與修正建議的缺口報告（gap report）。
+- **DoD 預檢與 Plan Critic 對抗式審查**：預先 dry-run 所有完成定義（DoD）指令以排除壞掉的測試；多任務或高風險計畫更會先由唯讀的 Plan Critic 進行挑戰，幫你提前抓出規格漏洞。
+- **有上限的獨立審查迴圈**：每個 Worker 的修改都必須通過 DoD 檢查並由 Lead 逐行審查 diff；最多進行 3 輪修正迴圈，超過即交由你裁決，避免 agent 陷入無限重試。
+
+### ⚡ 安全平行化，大幅縮短重構時間
+- **多 Worker 同時平行施工**：互相獨立的任務會在各自的 git worktree 中同時執行；有相依性的任務則依序分階段（`staged` 模式）執行，每一階段都建立在前一階段已驗證整合的基礎上。
+- **環境自動配置，開箱即可跑測試**：自動將被 gitignore 的 `.env` / `.env.*` 複製到新 worktree，並透過 symlink 連結 `.venv` 虛擬環境，免去手動設定環境的麻煩。
+- **內建專案脈絡的 Spec**：自動從 `AGENTS.md` / `CLAUDE.md` 擷取專案規範與常見陷阱寫入 spec，讓沒有共用記憶的 Worker 也能一次做對。
+
+### 💡 極致精簡 Context 視窗並節省 Token 成本
+- **單行 Log 濃縮機制**：所有 test、lint 與 build 指令皆透過 `run_logged.sh` 執行，只回傳一行執行摘要（僅在失敗時附上最後幾行 log），避免冗長的測試輸出塞爆 Lead 的 context。
+- **兩階段 Session 切分**：多任務或高風險流程會將狀態保存在 `<git-common-dir>/sar-run/`，讓規劃（Phase 1）與執行（Phase 2）分開在不同 session 進行，維持最佳推理品質。
+- **依任務性質自動分配最佳模型**：自動偵測 Claude Code、Codex CLI 或 Antigravity 環境，在 Phase 1 採用高階推理模型做稽核與規格設計，在 Phase 2 與 Worker 採用快速、高性價比的模型執行實作。
+
+### 🔧 零設定且自動適應 Repo 佈局
+- **免設定直接套用**：自動偵測一般 repo 與 bare-repo worktree 佈局（`<root>/.bare` + `<root>/main/`），並提供安全的就地轉換工具（`migrate_to_bare.sh`，先 dry-run、失敗自動 rollback）與根目錄 agent 設定 symlink。
 
 ## 運作方式
 
