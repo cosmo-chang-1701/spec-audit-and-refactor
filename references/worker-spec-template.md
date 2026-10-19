@@ -31,8 +31,9 @@ write, or run commands in any worktree but your own.
   whole tree — a different version rewrites unrelated files.
 - Docker Compose derives its project name from the directory name, which is the same in
   every worktree (e.g. `app/`), so all worktrees share one set of images, volumes, and
-  networks. Use only `docker compose run --rm ...`; never `build`, `up`, or `down`. If the
-  DoD needs a rebuilt image (Dockerfile or dependency changes), stop and report.
+  networks. Use only `docker compose run --rm ...`; never `build`, `up`, or `down` (the
+  Lead's `worktree.sh remove` stops what `run` leaves behind). If the DoD needs a rebuilt
+  image (Dockerfile or dependency changes), stop and report.
 
 ## Goal
 <One or two sentences: the outcome, not the steps.>

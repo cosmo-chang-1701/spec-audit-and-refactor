@@ -122,6 +122,8 @@ Never silently drop a task or its dependents.
 - Remove task worktrees with `worktree.sh remove <slug>` and stage worktrees with
   `worktree.sh remove --stage <n>`. A stage branch built only from merges is deleted locally
   (task branches are kept unless merged), so push or keep the PR's stage branch first.
+  `remove` first runs `docker compose down` (volumes kept) for Compose projects started only
+  from inside that worktree; one shared with another checkout is left running.
 
 ## 7. Run state
 `<run dir>/state.json` (run dir = `worktree.sh rundir`) is what a fresh phase 2 session

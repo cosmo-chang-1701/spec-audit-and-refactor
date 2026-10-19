@@ -208,7 +208,9 @@ Tasks loop independently of each other.
    per-stage PRs); push or `gh pr create` only with explicit consent.
 3. With user consent, `bash SKILL_DIR/scripts/worktree.sh remove <slug>` for every task and
    `remove --stage <n>` for every stage (refuses dirty worktrees without `--force`; task
-   branches are deleted only if merged).
+   branches are deleted only if merged). Each `remove` first runs `docker compose down`
+   (volumes kept) for Compose projects started only from inside that worktree; a project
+   shared with another checkout is left running and reported.
 4. With user consent, `bash SKILL_DIR/scripts/worktree.sh rundir --archive` (keeps the
    plan, specs, and logs as `sar-run.<timestamp>/` in the git common dir; delete it if the
    user prefers).
@@ -219,7 +221,7 @@ Tasks loop independently of each other.
 | Script | Purpose | Exit codes |
 | :--- | :--- | :--- |
 | `scripts/detect_runtime.sh [--agent X]` | Ecosystem + model JSON | 0 ok, 2 usage |
-| `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sar-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
+| `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sar-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir; `remove` runs `docker compose down` for the worktree's own Compose projects first (`SAR_COMPOSE_DOWN=0` disables) | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
 | `scripts/run_logged.sh <log> '<command>'` | Runs a command with its output in a log file; prints a one-line summary (plus the tail on failure) | the command's exit code, 2 usage |
 | `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
 | `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
