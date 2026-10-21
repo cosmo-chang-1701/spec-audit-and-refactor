@@ -97,10 +97,10 @@ flowchart LR
    record a baseline of the Lead's checkout.
 2. **Audit** — scan the agreed scope, run existing lint/test/type-check commands, write a
    gap report, and group findings into tasks with small, non-overlapping whitelists.
-3. **Spec** — fill a [spec template](references/worker-spec-template.md) per task and an
-   [execution plan](references/execution-plan.md) (`independent` or `staged`). Check
+3. **Spec** — fill a [spec template](skills/spec-audit-and-refactor/references/worker-spec-template.md) per task and an
+   [execution plan](skills/spec-audit-and-refactor/references/execution-plan.md) (`independent` or `staged`). Check
    whitelists for overlap, dry-run every DoD command to catch broken or unreachable ones, and
-   for larger or riskier plans have a read-only [Plan Critic](references/plan-critic.md)
+   for larger or riskier plans have a read-only [Plan Critic](skills/spec-audit-and-refactor/references/plan-critic.md)
    challenge the specs. The user gets a decision matrix (scope, risk, shared resources per
    task) ahead of the full specs. **Nothing is dispatched until the user approves.**
    After approval the Lead writes `state.json` to the run dir and ends phase 1: run `/clear`,
@@ -110,18 +110,18 @@ flowchart LR
    right away on the phase 1 Lead model; set `SAR_SESSION_SPLIT=always|never` or say so at
    the checkpoint to change that.
 4. **Worktree + dispatch** — create one worktree per task on branch `sar/<slug>` and
-   dispatch the stage's Workers in parallel (see [dispatch.md](references/dispatch.md)).
+   dispatch the stage's Workers in parallel (see [dispatch.md](skills/spec-audit-and-refactor/references/dispatch.md)).
 5. **Gate** — run `check_scope.sh`, then re-run every DoD command (through
    `run_logged.sh`); all must pass.
 6. **Review** — review the diff against the recorded base using the
-   [review checklist](references/review-checklist.md). In staged mode, approved tasks are
+   [review checklist](skills/spec-audit-and-refactor/references/review-checklist.md). In staged mode, approved tasks are
    committed locally and merged into `sar-stage/<n>` before the next stage starts; between
    stages the user may again continue in a fresh session.
 7. **Close-out** — verify the baseline is unchanged, offer PRs, remove worktrees, and
    archive the run dir.
    Pushing, opening PRs and deleting worktrees each require explicit user consent.
 
-The full procedure lives in [SKILL.md](SKILL.md).
+The full procedure lives in [SKILL.md](skills/spec-audit-and-refactor/SKILL.md).
 
 ## Requirements
 
@@ -129,23 +129,49 @@ The full procedure lives in [SKILL.md](SKILL.md).
 - **python3** (used to read and emit JSON configuration)
 - An agent runtime that supports skills and subagents:
   [Claude Code](https://docs.claude.com/en/docs/claude-code), Codex CLI, or Antigravity CLI
+- Optional: [Node.js](https://nodejs.org/) ≥ 22 (only for the `npx skills` install)
 - Optional: [GitHub CLI](https://cli.github.com/) (`gh`) for opening PRs at close-out
 
 ## Installation
 
-Clone the repository into your agent's skills directory:
+Install with the [`skills` CLI](https://github.com/vercel-labs/skills):
 
 ```bash
-# Shared skills directory
-git clone https://github.com/cosmo-chang-1701/spec-audit-and-refactor.git \
-  ~/.agents/skills/spec-audit-and-refactor
+# Current project: installs to .agents/skills/ and links .claude/skills/ etc.
+npx skills add cosmo-chang-1701/spec-audit-and-refactor
 
-# Claude Code reads personal skills from ~/.claude/skills
-ln -s ~/.agents/skills/spec-audit-and-refactor ~/.claude/skills/spec-audit-and-refactor
+# All projects: installs to ~/.agents/skills/spec-audit-and-refactor and links ~/.claude/skills/
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -g
+
+# Pick agents explicitly
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -a claude-code -a codex
+
+# Preview what would be installed
+npx skills add cosmo-chang-1701/spec-audit-and-refactor --list
+
+# Update / uninstall
+npx skills update
+npx skills remove spec-audit-and-refactor
 ```
 
-For a single project, place (or symlink) the directory under that project's skills
-directory instead, e.g. `.claude/skills/spec-audit-and-refactor`.
+Only the `skills/spec-audit-and-refactor/` directory is installed; the README, LICENSE and
+`tests/` stay in the repository.
+
+### Manual / development install
+
+The repository root is no longer a skill, so do **not** clone it into
+`~/.agents/skills/spec-audit-and-refactor` (that is also where `npx skills add -g` writes).
+Clone it somewhere else and symlink the skill directory:
+
+```bash
+git clone https://github.com/cosmo-chang-1701/spec-audit-and-refactor.git \
+  ~/src/spec-audit-and-refactor
+
+ln -s ~/src/spec-audit-and-refactor/skills/spec-audit-and-refactor \
+  ~/.agents/skills/spec-audit-and-refactor
+ln -s ~/src/spec-audit-and-refactor/skills/spec-audit-and-refactor \
+  ~/.claude/skills/spec-audit-and-refactor
+```
 
 ## Usage
 
@@ -223,7 +249,7 @@ For repos that deviate, add `.agents/spec-audit.json`:
 | `SAR_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for multi-task or H-risk runs), `always`, `never` |
 | `SAR_LOG_TAIL` | Lines of log `run_logged.sh` prints on failure (default `40`) |
 
-See `scripts/worktree.sh --help` for the full resolution rules.
+See `skills/spec-audit-and-refactor/scripts/worktree.sh --help` for the full resolution rules.
 
 ## Scripts
 
@@ -231,12 +257,12 @@ All scripts can also be used on their own.
 
 | Script | Purpose |
 | :--- | :--- |
-| [`detect_runtime.sh`](scripts/detect_runtime.sh) | Detect the agent ecosystem and print the phase 1 / phase 2 Lead and Worker models as JSON |
-| [`worktree.sh`](scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir` |
-| [`run_logged.sh`](scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
-| [`check_scope.sh`](scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
-| [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
-| [`wt.sh`](scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead; `link-config` re-syncs the agent-config symlinks at the container root |
+| [`detect_runtime.sh`](skills/spec-audit-and-refactor/scripts/detect_runtime.sh) | Detect the agent ecosystem and print the phase 1 / phase 2 Lead and Worker models as JSON |
+| [`worktree.sh`](skills/spec-audit-and-refactor/scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir` |
+| [`run_logged.sh`](skills/spec-audit-and-refactor/scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
+| [`check_scope.sh`](skills/spec-audit-and-refactor/scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
+| [`migrate_to_bare.sh`](skills/spec-audit-and-refactor/scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
+| [`wt.sh`](skills/spec-audit-and-refactor/scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead; `link-config` re-syncs the agent-config symlinks at the container root |
 
 Whitelist format used by `check_scope.sh`:
 
@@ -251,16 +277,21 @@ tests/auth/          # trailing / means the whole directory
 
 ```text
 .
-├── SKILL.md                     # Entry point read by the agent
-├── references/
-│   ├── bare-layout.md           # Bare-repo layout and the migration prompt
-│   ├── dispatch.md              # How to dispatch Workers per runtime
-│   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report, run state
-│   ├── plan-critic.md           # Read-only adversarial review of the specs
-│   ├── review-checklist.md      # Diff review and verdict format
-│   └── worker-spec-template.md  # Spec handed to each Worker
-├── scripts/                     # Bash helpers (see above)
-└── tests/                       # Script tests in throwaway repos
+├── skills/
+│   └── spec-audit-and-refactor/ # The skill itself: the only part that gets installed
+│       ├── SKILL.md             # Entry point read by the agent
+│       ├── references/
+│       │   ├── bare-layout.md           # Bare-repo layout and the migration prompt
+│       │   ├── dispatch.md              # How to dispatch Workers per runtime
+│       │   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report, run state
+│       │   ├── plan-critic.md           # Read-only adversarial review of the specs
+│       │   ├── review-checklist.md      # Diff review and verdict format
+│       │   └── worker-spec-template.md  # Spec handed to each Worker
+│       └── scripts/             # Bash helpers (see above)
+├── tests/                       # Script tests in throwaway repos (not installed)
+├── README.md
+├── README.zh-TW.md
+└── LICENSE
 ```
 
 ## Testing
@@ -283,7 +314,8 @@ Issues and pull requests are welcome. Before submitting:
 1. Keep scripts in Bash with `set -euo pipefail`, matching the existing style.
 2. Add or update tests under `tests/` for any script change, and make sure all test
    suites pass.
-3. Keep `SKILL.md` and the files under `references/` in sync with script behaviour.
+3. Keep `skills/spec-audit-and-refactor/SKILL.md` and the files under
+   `skills/spec-audit-and-refactor/references/` in sync with script behaviour.
 
 ## License
 
