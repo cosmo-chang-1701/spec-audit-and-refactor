@@ -11,6 +11,8 @@ check_eq "lead model" "$(json_get '["lead"]["model"]' <<<"$out")" claude-opus-5-
 check_eq "lead effort" "$(json_get '["lead"]["effort"]' <<<"$out")" high
 check_eq "phase 2 lead model" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" claude-sonnet-5-5
 check_eq "phase 2 lead effort" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" high
+check_eq "lead dispatch alias" "$(json_get '["lead"]["dispatch_model"]' <<<"$out")" opus
+check_eq "phase 2 lead dispatch alias" "$(json_get '["lead_phase2"]["dispatch_model"]' <<<"$out")" sonnet
 check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" claude-sonnet-5-5
 check_eq "worker effort" "$(json_get '["worker"]["effort"]' <<<"$out")" medium
 check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" sonnet
@@ -26,6 +28,7 @@ AGENT=gemini; out=$(run)
 check_eq "lead model" "$(json_get '["lead"]["model"]' <<<"$out")" gemini-4-argon-high
 check_eq "phase 2 lead model" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" gemini-3.8-flash-high
 check_eq "phase 2 lead effort" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" high
+check_eq "lead dispatch alias" "$(json_get '["lead"]["dispatch_model"]' <<<"$out")" gemini-4-argon-high
 check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" gemini-3.8-flash-high
 check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" gemini-3.8-flash-high
 check_eq "light worker = worker" "$(json_get '["worker_light"]' <<<"$out")" "$(json_get '["worker"]' <<<"$out")"
@@ -42,6 +45,8 @@ section "overrides"
 AGENT=claude; out=$(run SAR_LEAD2_MODEL=claude-opus-5-5 SAR_LEAD2_EFFORT=medium SAR_LEAD_EFFORT=max SAR_WORKER_MODEL=haiku)
 check_eq "SAR_LEAD2_MODEL" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" claude-opus-5-5
 check_eq "SAR_LEAD2_EFFORT" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" medium
+check_eq "SAR_LEAD2_MODEL sets the dispatch alias" "$(json_get '["lead_phase2"]["dispatch_model"]' <<<"$out")" claude-opus-5-5
+check_eq "SAR_LEAD_MODEL sets the dispatch alias" "$(json_get '["lead"]["dispatch_model"]' <<<"$(run SAR_LEAD_MODEL=sonnet)")" sonnet
 check_eq "SAR_LEAD_EFFORT leaves phase 2 alone" "$(json_get '["lead_phase2"]["effort"]' <<<"$(run SAR_LEAD_EFFORT=max)")" high
 check_eq "SAR_WORKER_MODEL sets the dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" haiku
 out=$(run SAR_WORKER_LIGHT_MODEL=sonnet SAR_WORKER_LIGHT_EFFORT=low SAR_SCOUT_MODEL=sonnet SAR_SCOUT_EFFORT=medium)

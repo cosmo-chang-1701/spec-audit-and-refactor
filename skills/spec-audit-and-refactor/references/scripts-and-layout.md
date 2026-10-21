@@ -7,6 +7,7 @@ Script paths are relative to the skill directory (`SKILL_DIR` in SKILL.md).
 | :--- | :--- | :--- |
 | `scripts/detect_runtime.sh [--agent X]` | Ecosystem + model JSON | 0 ok, 2 usage |
 | `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sar-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir; `remove` runs `docker compose down` for the worktree's own Compose projects first (`SAR_COMPOSE_DOWN=0` disables) | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
+| `scripts/pr.sh preflight\|open\|merge` | Opens an approved task's PR (push, `gh pr create`, reusing an open one) and merges it after its checks pass; one JSON line on stdout. `preflight` = can PRs be opened at all. Never uses `--admin` | 0 ok, 1 not done (JSON says why), 2 usage |
 | `scripts/run_logged.sh <log> '<command>'` | Runs a command with its output in a log file; prints a one-line summary (plus the tail on failure) | the command's exit code, 2 usage |
 | `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
 | `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
@@ -38,6 +39,9 @@ Overrides, only for a repo that deviates: env `SAR_WORKTREE_ROOT`, or
 default-branch worktree or the container root) with keys `worktreeRoot`, `pathStyle`
 (`slug`|`branch`), `defaultBase`, `sourceWorktree`, `provision`
 (`{"copy": [...], "link": [...], "copyMode": "644"}`, replaces auto-discovery),
-`maxParallel`, `workerNotes`, `offerBareLayout` (`false` = never offer the conversion);
-see `worktree.sh --help`.
+`maxParallel`, `workerNotes`, `offerBareLayout` (`false` = never offer the conversion),
+`autoMerge` (`manual` | `low-risk` (default) | `all`; env `SAR_AUTO_MERGE`) and `mergeMethod`
+(`squash` (default) | `merge` | `rebase`; env `SAR_MERGE_METHOD`); see `worktree.sh --help`.
+`pr.sh` reads `SAR_PR_TIMEOUT` (seconds to wait for checks, default 1800) and
+`SAR_PR_CHECKS_DELAY` (default 20).
 Branch prefixes: `SAR_BRANCH_PREFIX` (tasks, default `sar/`), `SAR_STAGE_PREFIX` (stages, default `sar-stage/`).

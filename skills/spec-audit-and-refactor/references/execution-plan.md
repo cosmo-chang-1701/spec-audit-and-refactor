@@ -32,12 +32,12 @@ Lead the report with what needs a human decision; put the detail last. Always in
 
 **① Decision matrix** — one row per task:
 
-| Task | Findings | Scope | Stage ← deps | Risk | Worker | Shared resources | DoD baseline | Critic |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| fix-auth-token | #1, #4 | `src/auth/` · 6 files | 1 | H — auth | standard | — | 1 FAIL-EXPECTED · 2 PASS | 1 accepted |
-| add-rate-limit | #2 | `src/api/middleware/` · 3 files | 1 | M | standard | Redis (compose) | 1 NOT-YET · 2 PASS | — |
-| drop-dead-helpers | #5 | `src/utils/` · 2 files | 1 | L | light | — | 1 FAIL-EXPECTED · 1 PASS | — |
-| migrate-callers | #3 | `src/api/routes/` · 11 files | 2 ← fix-auth-token | M | standard | `routes/index.py` POSSIBLE | 2 PASS · 1 FAIL-EXPECTED | 1 rejected (H) |
+| Task | Findings | Scope | Stage ← deps | Risk | Worker | Merge | Shared resources | DoD baseline | Critic |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| fix-auth-token | #1, #4 | `src/auth/` · 6 files | 1 | H — auth | standard | manual | — | 1 FAIL-EXPECTED · 2 PASS | 1 accepted |
+| add-rate-limit | #2 | `src/api/middleware/` · 3 files | 1 | M | standard | manual | Redis (compose) | 1 NOT-YET · 2 PASS | — |
+| drop-dead-helpers | #5 | `src/utils/` · 2 files | 1 | L | light | auto* | — | 1 FAIL-EXPECTED · 1 PASS | — |
+| migrate-callers | #3 | `src/api/routes/` · 11 files | 2 ← fix-auth-token | M | standard | manual | `routes/index.py` POSSIBLE | 2 PASS · 1 FAIL-EXPECTED | 1 rejected (H) |
 
 - **Scope**: top directories of the whitelist and the file count from
   `check_scope.sh --list <source_worktree> <slug>.wl`.
@@ -48,6 +48,11 @@ Lead the report with what needs a human decision; put the detail last. Always in
   - **L**: local, behaviour-preserving, covered by tests.
 - **Worker**: `light` or `standard` per [models.md](models.md#worker-tier); the user may
   override it with the approval.
+- **Merge**: whether the task's PR is merged automatically once it is open, pre-filled from
+  `auto_merge` (`worktree.sh config`; [modes](#auto-merge-modes)): `manual` → every task
+  `manual`; `low-risk` → Risk L tasks `auto*`, the rest `manual`; `all` → every task `auto`.
+  `auto*` is conditional: the task must also be approved in review round 1 and keep its Worker
+  tier. The user may change a task's value, or the mode, with the approval.
 - **Shared resources**:
   - static: `OVERLAP` / `POSSIBLE` lines from `check_scope.sh --overlap`, lockfiles,
     migrations, common fixtures;
@@ -59,7 +64,9 @@ Lead the report with what needs a human decision; put the detail last. Always in
 Below the matrix, one line on the session plan
 ([SKILL.md](../SKILL.md#sessions-and-context)), so the user can override it with the approval:
 `Session: single (auto — one L/M task)` or `Session: split (auto — 3 tasks)`; the source is
-`auto`, `always`, `never` (from `SAR_SESSION_SPLIT`) or `user`.
+`auto`, `always`, `never` (from `SAR_SESSION_SPLIT`) or `user`. Then one line on the PRs:
+`PRs: open on APPROVE · merge low-risk (config) · squash · into main`, or
+`PRs: local commits only — <pr.sh preflight reason>` when `pr.sh preflight` failed.
 
 **② Decisions for you** — one bullet each, empty section if none: every H-risk task, every
 rejected H Critic finding (with the reason), every `FAIL-UNRELATED` DoD, every whitelist
@@ -76,9 +83,30 @@ Inter-stage: local commits on sar/* and sar-stage/* branches, merges via worktre
 
 **④ Gap report and full specs**, with the run-dir path of each spec file.
 
-For `staged`, explicitly ask the user to approve the inter-stage local commits and merges.
-That approval covers only those local operations; push and PR creation still need their own
-consent at close-out. Record it in `state.json` (§7) so a phase 2 session can rely on it.
+The approval is what authorises the Lead's commits, pushes and PRs, so state it explicitly and
+ask the user to approve it:
+- after APPROVE, `git commit` on the task's `sar/*` branch (for `staged`: the inter-stage local
+  commits and merges, and the PR from the last `sar-stage/<n>`), then push that branch and open
+  a PR into the default branch;
+- for every task whose Merge is `auto`, merging that PR once its checks pass, with the
+  configured method, and deleting the remote head branch.
+
+The user may narrow it (change the mode, change one task to `manual`, or "no PRs": commit
+locally only). It never covers removing worktrees or archiving the run dir; those keep their own
+consent at close-out. Record the approval in `state.json` (§7) so a phase 2 session can rely on it.
+
+### Auto-merge modes
+`auto_merge` in `worktree.sh config` (`autoMerge` in `.agents/spec-audit.json`, env
+`SAR_AUTO_MERGE`) sets what happens to a task's PR after it is opened. Every APPROVEd task gets
+a PR in all three modes.
+
+| Mode | PRs the Lead merges |
+| :--- | :--- |
+| `manual` | None — the user merges. |
+| `low-risk` (default) | Tasks with Risk **L** that were approved in round 1 (never REQUEST_CHANGES, a failed gate included) and were not escalated to the `worker` model. |
+| `all` | Every task with Merge `auto`, i.e. all of them unless the user changed one. |
+
+Merge method: `merge_method` (`mergeMethod`, env `SAR_MERGE_METHOD`; default `squash`).
 
 ## 4. Running a stage
 `independent` mode is a single stage without steps 4–6.
@@ -109,9 +137,31 @@ consent at close-out. Record it in `state.json` (§7) so a phase 2 session can r
    the stage `integrated` and advance `current_stage` in `state.json`; this is the point where
    the user may continue in a fresh session (`/clear`, then `resume`).
 
+## 4a. After APPROVE (independent mode)
+No question to the user; the checkpoint approval covers it. Per task, as soon as it is APPROVEd
+(use `run_logged.sh` for the `pr.sh` calls, logs `<slug>-pr-<step>.log`; the JSON is the last
+line):
+1. Re-run the baseline command; it must match, or stop and report (nothing is committed).
+2. `git -C <wt> add -A && git -C <wt> commit -m "sar(<slug>): <goal>"` → status `committed`.
+3. If `pr_enabled`: write `<run dir>/pr-<slug>.md` (goal, finding numbers, DoD commands with
+   results, review summary, `Merge: auto|manual`) and run
+   `bash SKILL_DIR/scripts/pr.sh open <wt> --title "sar(<slug>): <goal>" --body-file <run dir>/pr-<slug>.md`
+   → status `pr-open`, record `pr`. Exit 1: record the `reason`, stay `committed`, and list the
+   manual commands in the final summary.
+4. Merge when the task's `merge` is `auto` **and**, in `low-risk` mode, `risk == "L"`,
+   `ever_rejected == false` and `worker_tier` was not escalated: `pr.sh merge <pr> --method
+   <merge_method>` → status `merged`. In Claude Code run it with `run_in_background` so
+   waiting for CI does not hold up the other tasks. Exit 1: record `pr_state`
+   (`checks-failed`, `checks-timeout`, `merge-refused`), leave the PR open and report it.
+   Otherwise leave the PR open and say why in the summary (`manual: risk M`,
+   `manual: 2 review rounds`).
+
+`pr.sh` never uses `--admin` and never works around branch protection; a refused merge is
+the user's to resolve.
+
 ## 5. When a task fails
 A task that is still REQUEST_CHANGES after 3 rounds (or is blocked on a non-whitelisted file)
-stops the barrier. Report to the user and let them choose:
+stops the barrier. It is not committed and gets no PR. Report to the user and let them choose:
 - **Defer** it and every task that transitively depends on it; integrate the rest of the stage
   and continue with the remaining plan, or
 - **Revise** the spec (whitelist, goal, DoD), which needs fresh approval.
@@ -119,9 +169,16 @@ stops the barrier. Report to the user and let them choose:
 Never silently drop a task or its dependents.
 
 ## 6. Close-out
-- `independent`: offer one PR per task branch.
-- `staged`: offer either a single PR from the last `sar-stage/<n>` (contains everything) or
-  stacked PRs per stage. Ask; never push without consent.
+- `independent`: the PRs were opened (and merged where allowed) at §4a; collect them into the
+  summary: PR URL and `merged` / `open — <reason>` / `local only — <reason>` per task.
+- `staged`: after the last stage's integration gate and the baseline check, `pr.sh open
+  <stage worktree> --base <default_base_sha> ...` for `sar-stage/<last>` (one PR with
+  everything; stacked per-stage PRs only if the user asked for them at the checkpoint). Merge
+  it with `pr.sh merge` by the mode: `manual` never; `low-risk` only when **every** task is Risk
+  L, was approved in round 1 and was not escalated; `all` always.
+- Removing worktrees and archiving the run dir still need the user's consent. A squash or
+  rebase merge leaves `sar/<slug>` "unmerged" for `worktree.sh remove`, which keeps the
+  branch; delete it with `git branch -D` after the user agrees, once its PR is `merged`.
 - Remove task worktrees with `worktree.sh remove <slug>` and stage worktrees with
   `worktree.sh remove --stage <n>`. A stage branch built only from merges is deleted locally
   (task branches are kept unless merged), so push or keep the PR's stage branch first.
@@ -143,6 +200,10 @@ It records facts only — decisions stay in `plan.md` and the specs.
   "baseline": "<exact output of the step 0 baseline command>",
   "default_base": "origin/main",
   "default_base_sha": "1a2b3c4d…",
+  "auto_merge": "low-risk",
+  "merge_method": "squash",
+  "pr_enabled": true,
+  "pr_into": "main",
   "mode": "staged",
   "max_parallel": 4,
   "current_stage": 1,
@@ -151,7 +212,8 @@ It records facts only — decisions stay in `plan.md` and the specs.
     {"n": 2, "status": "pending", "tasks": ["migrate-callers"]}
   ],
   "tasks": {
-    "fix-auth-token": {"stage": 1, "status": "pending", "worker_tier": "standard", "round": 0, "worktree": null, "open_findings": []}
+    "fix-auth-token": {"stage": 1, "status": "pending", "worker_tier": "standard", "round": 0, "worktree": null, "open_findings": [],
+                       "risk": "H", "merge": "manual", "ever_rejected": false, "pr": null, "pr_state": null}
   }
 }
 ```
@@ -160,8 +222,13 @@ It records facts only — decisions stay in `plan.md` and the specs.
   A resumed session always runs on the `lead_phase2` model, whichever it was.
 - Stage status: `pending` → `running` → `integrated` (or `deferred`).
 - Task status: `pending` → `dispatched` → `in-review` (with `round`) → `approved` →
-  `committed`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
+  `committed` → `pr-open` → `merged`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
   last REQUEST_CHANGES, so a resumed session can re-dispatch with them.
+- `risk` and `merge` (`auto` | `manual`) come from the decision matrix; `ever_rejected` turns
+  `true` on the first REQUEST_CHANGES (a failed gate counts) and never goes back, since `round`
+  only shows the latest. `pr` is the PR URL; `pr_state` is the last non-success result of
+  `pr.sh` (`checks-failed`, `checks-timeout`, `merge-refused`). `pr_enabled` is `false` when
+  `pr.sh preflight` failed or the user asked for local commits only.
 - `worker_tier`: `light` or `standard` ([models.md](models.md#worker-tier)); set to
   `standard` when a `light` task is escalated, and a resumed session dispatches on that tier.
 - `approval` quotes what the user approved at the checkpoint; a resumed Lead never assumes

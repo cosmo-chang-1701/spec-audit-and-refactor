@@ -42,7 +42,7 @@
 
 | 角色 | 可以 | 不可以 |
 | :--- | :--- | :--- |
-| **Lead**（審查者／協調者） | 閱讀與搜尋程式碼、執行測試與 linter、撰寫 spec 與審查意見、管理 worktree | 在任何地方修改應用程式檔案 |
+| **Lead**（審查者／協調者） | 閱讀與搜尋程式碼、執行測試與 linter、撰寫 spec 與審查意見、管理 worktree；經你在 checkpoint 核准後，對通過審查的任務 commit 並開 PR、合併 PR | 在任何地方修改應用程式檔案；合併未通過審查的任務 |
 | **Worker**（subagent） | 在自己的 worktree 內修改白名單涵蓋的檔案，直到 DoD 通過 | 修改白名單以外的檔案、commit、push，或離開自己的 worktree |
 
 ## 使用本專案的好處
@@ -50,12 +50,12 @@
 ### 🛡️ 零意外波及（絕對的變更邊界與安全性）
 - **主工作目錄 100% 不受影響**：Lead 在開始前會記錄主 checkout 的狀態基準（baseline），並在收尾時再次比對確認。
 - **強制執行的檔案白名單**：每個任務都有專屬的白名單（`<slug>.wl`），`check_scope.sh` 會攔截任何超出範圍的變更（包含已 commit、已 stage、未 stage 或未追蹤檔案）。
-- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker；所有 commit、push、開 PR 與刪除 worktree 都必須先經過你的明確同意。
+- **關鍵決策由你掌控**：在你核准決策矩陣與 spec 之前，不會派出任何 Worker。這一次核准同時涵蓋每個通過審查任務的 commit、push 與開 PR；是否自動合併 PR 則由 `autoMerge` 設定決定（`manual`、`low-risk` 或 `all`）。刪除 worktree 一律需要你的明確同意。
 
 ### 🔍 雙重把關帶來更高品質的程式碼
 - **具證據力的唯讀稽核**：動手修改前，先產出包含 `file:line`、嚴重程度、具體證據與修正建議的缺口報告（gap report）。
 - **DoD 預檢與 Plan Critic 對抗式審查**：預先 dry-run 所有完成定義（DoD）指令以排除壞掉的測試；多任務或高風險計畫更會先由唯讀的 Plan Critic 進行挑戰，幫你提前抓出規格漏洞。
-- **有上限的獨立審查迴圈**：每個 Worker 的修改都必須通過 DoD 檢查並由 Lead 逐行審查 diff；最多進行 3 輪修正迴圈，超過即交由你裁決，避免 agent 陷入無限重試。
+- **有上限的獨立審查迴圈**：每個 Worker 的修改都必須通過 DoD 檢查，並由唯讀的 Reviewer subagent 以 Lead 模型逐行審查 diff、Lead 再驗證其意見；最多進行 3 輪修正迴圈，超過即交由你裁決，避免 agent 陷入無限重試。
 
 ### ⚡ 安全平行化，大幅縮短重構時間
 - **多 Worker 同時平行施工**：互相獨立的任務會在各自的 git worktree 中同時執行；有相依性的任務則依序分階段（`staged` 模式）執行，每一階段都建立在前一階段已驗證整合的基礎上。
@@ -85,7 +85,8 @@ flowchart LR
     E --> F[5. 審查<br/>最多 3 輪]
     F -->|REQUEST_CHANGES| D
     F -->|下一階段| D
-    F -->|APPROVE| G[6. 收尾]
+    F -->|APPROVE| PR[Commit + PR<br/>依 autoMerge 合併]
+    PR --> G[6. 收尾]
     end
 ```
 
@@ -104,11 +105,13 @@ flowchart LR
 4. **Worktree + 派工**：為每個任務在 `sar/<slug>` 分支上建立 worktree，並平行派出該階段的
    Worker（詳見 [dispatch.md](skills/spec-audit-and-refactor/references/dispatch.md)）。
 5. **檢查**：執行 `check_scope.sh`，再透過 `run_logged.sh` 重新執行所有 DoD 指令，全部都必須通過。
-6. **審查**：依照[審查清單](skills/spec-audit-and-refactor/references/review-checklist.md)，對照記錄的基準審查 diff。
-   在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sar-stage/<n>`，才進入下一階段；
-   階段之間也可以再換到新的 session 繼續。
-7. **收尾**：確認基準狀態未變、提供建立 PR 的選項、移除 worktree，並封存 run dir。
-   push、開 PR 與刪除 worktree 都需要使用者明確同意。
+6. **審查**：依照[審查清單](skills/spec-audit-and-refactor/references/review-checklist.md)，對照記錄的基準審查 diff：
+   由 phase 1 Lead 模型的唯讀 Reviewer subagent 進行審查，Lead 再驗證它的意見。APPROVE 後，
+   任務會自動 commit、push 並開 PR，`autoMerge` 允許時再合併該 PR（[模式](#自動合併模式)）。
+   在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sar-stage/<n>`，才進入下一階段，
+   最後一個階段整合成單一 PR；階段之間也可以再換到新的 session 繼續。
+7. **收尾**：確認基準狀態未變、彙整每個 PR 的狀態、移除 worktree，並封存 run dir。
+   刪除 worktree 與 run dir 需要使用者明確同意。
 
 完整流程請見 [SKILL.md](skills/spec-audit-and-refactor/SKILL.md)。
 
@@ -119,7 +122,7 @@ flowchart LR
 - 支援 skill 與 subagent 的 agent 執行環境：
   [Claude Code](https://docs.claude.com/en/docs/claude-code)、Codex CLI 或 Antigravity CLI
 - 選用：[Node.js](https://nodejs.org/) ≥ 22（僅 `npx skills` 安裝方式需要）
-- 選用：[GitHub CLI](https://cli.github.com/)（`gh`），用於收尾時開 PR
+- [GitHub CLI](https://cli.github.com/)（`gh`，需已登入），用於自動開 PR；沒有的話任務只會在本機 commit
 
 ## 安裝
 
@@ -196,7 +199,7 @@ session 接續：
 /spec-audit-and-refactor resume
 ```
 
-commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
+你在 checkpoint 的核准涵蓋每個通過審查任務的 commit、push 與開 PR（以及依 [`autoMerge`](#自動合併模式) 的合併）。移除 worktree 一律會先徵求你的同意。
 
 ### 預設模型分配
 
@@ -212,6 +215,7 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
   輕量任務，會改用 Worker 模型重新派工。
 - **Scout**：稽核範圍很大時，由唯讀的 scout 平行掃描並回傳 `file:line` 線索；phase 1 Lead 會逐一
   驗證線索，所有判斷仍由 Lead 負責。
+- **Reviewer**：審查每個 Worker diff 的唯讀 subagent，一律使用 phase 1 的 Lead 模型（單一 session 的流程中，Lead 本身就是該模型）。
 - **Plan Critic**：只有在有 H 風險任務時才使用 phase 1 的 Lead 模型，否則使用 phase 2 的 Lead 模型。
 
 可用 `SAR_LEAD_MODEL`、`SAR_LEAD_EFFORT`、`SAR_LEAD2_MODEL`、`SAR_LEAD2_EFFORT`、
@@ -242,9 +246,25 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
   "provision": { "copy": [".env.local"], "link": [".venv"], "copyMode": "644" },
   "maxParallel": 4,
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
-  "offerBareLayout": false
+  "offerBareLayout": false,
+  "autoMerge": "low-risk",
+  "mergeMethod": "squash"
 }
 ```
+
+### 自動合併模式
+
+通過審查的任務都會有一個 PR；`autoMerge` 決定 Lead 接著要合併哪些（PR 的 checks 通過後才合併，
+絕不使用 `--admin`，合併後會刪除遠端分支）：
+
+| `autoMerge` | 自動合併的 PR |
+| :--- | :--- |
+| `manual` | 全部不合併，由你自己合併 |
+| `low-risk`（預設） | L 風險、第 1 輪審查就通過且未升級到較強 Worker 模型的任務；`staged` 模式下須每個任務都符合 |
+| `all` | 全部 |
+
+`mergeMethod` 可設為 `squash`（預設）、`merge` 或 `rebase`。核准 checkpoint 時，你可以更改模式，
+或只更改單一任務的 Merge 欄位。
 
 | 環境變數 | 作用 |
 | :--- | :--- |
@@ -255,6 +275,10 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | `SAR_STAGE_PREFIX` | 階段分支前綴（預設 `sar-stage/`） |
 | `SAR_ECOSYSTEM` | 強制指定執行環境生態系（`claude`、`gemini`、`codex`） |
 | `SAR_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅多任務或 H 風險時）、`always`、`never` |
+| `SAR_AUTO_MERGE` | `manual`、`low-risk` 或 `all`（優先於 `autoMerge`） |
+| `SAR_MERGE_METHOD` | `squash`、`merge` 或 `rebase`（優先於 `mergeMethod`） |
+| `SAR_PR_TIMEOUT` | `pr.sh merge` 等待 PR checks 的秒數（預設 `1800`） |
+| `SAR_PR_CHECKS_DELAY` | PR 尚無 checks 時，`pr.sh` 再次查詢前等待的秒數（預設 `20`） |
 | `SAR_LOG_TAIL` | `run_logged.sh` 失敗時印出的 log 行數（預設 `40`） |
 
 完整的解析規則請執行 `skills/spec-audit-and-refactor/scripts/worktree.sh --help`。
@@ -268,6 +292,7 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | [`detect_runtime.sh`](skills/spec-audit-and-refactor/scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 phase 1 / phase 2 的 Lead 與 Worker 模型 |
 | [`worktree.sh`](skills/spec-audit-and-refactor/scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir` |
 | [`run_logged.sh`](skills/spec-audit-and-refactor/scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
+| [`pr.sh`](skills/spec-audit-and-refactor/scripts/pr.sh) | `preflight` / `open` / `merge`：檢查能否開 PR、push 任務分支並開（或沿用）PR、等 checks 通過後合併；輸出一行 JSON |
 | [`check_scope.sh`](skills/spec-audit-and-refactor/scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
 | [`migrate_to_bare.sh`](skills/spec-audit-and-refactor/scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
 | [`wt.sh`](skills/spec-audit-and-refactor/scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead；`link-config` 重新同步容器根目錄的 agent 設定 symlink |
@@ -315,6 +340,7 @@ bash tests/migrate_bare_test.sh
 bash tests/check_scope_test.sh
 bash tests/run_logged_test.sh
 bash tests/detect_runtime_test.sh
+bash tests/pr_test.sh
 ```
 
 ## 貢獻
