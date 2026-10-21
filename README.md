@@ -46,7 +46,7 @@ To enforce this, the skill strictly separates responsibilities:
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
-| **Lead** (reviewer / orchestrator) | Read and search code, run tests and linters, write specs and reviews, manage worktrees | Edit application files — anywhere |
+| **Lead** (reviewer / orchestrator) | Read and search code, run tests and linters, write specs and reviews, manage worktrees; after your checkpoint approval, commit approved work and open / merge its PR | Edit application files — anywhere; merge a task that was not approved |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its own worktree, until the DoD passes | Touch non-whitelisted files, commit, push, or leave its worktree |
 
 ## Key benefits
@@ -54,12 +54,12 @@ To enforce this, the skill strictly separates responsibilities:
 ### 🛡️ Zero unintended blast radius
 - **Guaranteed clean main checkout**: The Lead records a cryptographic baseline of your working tree before starting and verifies it at close-out.
 - **Enforced file whitelists**: Every task gets an explicit glob whitelist (`<slug>.wl`). `check_scope.sh` blocks committed, staged, unstaged, or untracked changes outside that boundary.
-- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs; commits, pushes, PRs, and worktree cleanup always require your explicit consent.
+- **Human-in-the-loop control**: Nothing is dispatched until you approve the decision matrix and specs. That one approval also covers the commit, push and PR of every task that passes review; whether the PR is merged for you is your `autoMerge` setting (`manual`, `low-risk` or `all`). Worktree cleanup always needs your explicit consent.
 
 ### 🔍 Higher code quality through adversarial verification
 - **Evidence-based read-only audit**: Produces a structured gap report with `file:line`, severity, concrete evidence, and proposed fixes before a single line of code is touched.
 - **Pre-flight DoD validation & Plan Critic**: Definition-of-Done commands are dry-run ahead of time to catch broken tests, and complex/high-risk plans are challenged by a read-only Plan Critic before you review them.
-- **Bounded independent code review**: Every Worker's diff is verified against its DoD and reviewed line-by-line by the Lead (capped at 3 rounds before escalating to you, preventing infinite agent loops).
+- **Bounded independent code review**: Every Worker's diff is verified against its DoD and reviewed line-by-line on the Lead model by a read-only Reviewer subagent whose findings the Lead verifies (capped at 3 rounds before escalating to you, preventing infinite agent loops).
 
 ### ⚡ Faster delivery with safe parallelism
 - **Concurrent Worker subagents**: Independent tasks run in parallel inside separate git worktrees; dependent tasks run in dependency-ordered stages (`staged` mode), each building on the verified, integrated result of the previous stage.
@@ -89,7 +89,8 @@ flowchart LR
     E --> F[5. Review<br/>≤ 3 rounds]
     F -->|REQUEST_CHANGES| D
     F -->|next stage| D
-    F -->|APPROVE| G[6. Close-out]
+    F -->|APPROVE| PR[Commit + PR<br/>merge per autoMerge]
+    PR --> G[6. Close-out]
     end
 ```
 
@@ -114,12 +115,16 @@ flowchart LR
 5. **Gate** — run `check_scope.sh`, then re-run every DoD command (through
    `run_logged.sh`); all must pass.
 6. **Review** — review the diff against the recorded base using the
-   [review checklist](skills/spec-audit-and-refactor/references/review-checklist.md). In staged mode, approved tasks are
-   committed locally and merged into `sar-stage/<n>` before the next stage starts; between
-   stages the user may again continue in a fresh session.
-7. **Close-out** — verify the baseline is unchanged, offer PRs, remove worktrees, and
-   archive the run dir.
-   Pushing, opening PRs and deleting worktrees each require explicit user consent.
+   [review checklist](skills/spec-audit-and-refactor/references/review-checklist.md): a read-only
+   Reviewer subagent on the phase 1 Lead model does the review and the Lead verifies its
+   findings. On APPROVE the task is committed, pushed and opened as a PR automatically, and the
+   PR is merged when `autoMerge` allows it ([modes](#auto-merge-modes)). In staged mode,
+   approved tasks are committed locally and merged into `sar-stage/<n>` before the next stage
+   starts, and the last stage becomes a single PR; between stages the user may again continue in
+   a fresh session.
+7. **Close-out** — verify the baseline is unchanged, summarise each PR's state, remove
+   worktrees, and archive the run dir. Deleting worktrees and the run dir requires explicit
+   user consent.
 
 The full procedure lives in [SKILL.md](skills/spec-audit-and-refactor/SKILL.md).
 
@@ -130,7 +135,7 @@ The full procedure lives in [SKILL.md](skills/spec-audit-and-refactor/SKILL.md).
 - An agent runtime that supports skills and subagents:
   [Claude Code](https://docs.claude.com/en/docs/claude-code), Codex CLI, or Antigravity CLI
 - Optional: [Node.js](https://nodejs.org/) ≥ 22 (only for the `npx skills` install)
-- Optional: [GitHub CLI](https://cli.github.com/) (`gh`) for opening PRs at close-out
+- [GitHub CLI](https://cli.github.com/) (`gh`), logged in, for the automatic PRs; without it tasks are only committed locally
 
 ## Installation
 
@@ -210,7 +215,8 @@ continue with:
 /spec-audit-and-refactor resume
 ```
 
-Commits, pushes, PRs and worktree removal are always confirmed with you first.
+Your checkpoint approval covers the commit, push and PR of every approved task (and the merge,
+per [`autoMerge`](#auto-merge-modes)). Worktree removal is always confirmed with you first.
 
 ### Default model assignment
 
@@ -227,6 +233,8 @@ Cheaper models go only where the work is simple and checked afterwards:
   review is re-dispatched on the Worker model.
 - **Scout** — for a large audit scope, read-only scouts sweep it in parallel and return
   `file:line` leads; the phase 1 Lead verifies each lead and does all the judging.
+- **Reviewer** — the read-only subagent that reviews each Worker's diff always runs on the
+  phase 1 Lead model (in a single-session run the Lead itself already is that model).
 - **Plan Critic** — runs on the phase 1 Lead model only when a task is H-risk, otherwise on
   the phase 2 Lead model.
 
@@ -260,9 +268,24 @@ For repos that deviate, add `.agents/spec-audit.json`:
   "provision": { "copy": [".env.local"], "link": [".venv"], "copyMode": "644" },
   "maxParallel": 4,
   "workerNotes": "Run tests with `make test`, never `pytest` directly.",
-  "offerBareLayout": false
+  "offerBareLayout": false,
+  "autoMerge": "low-risk",
+  "mergeMethod": "squash"
 }
 ```
+
+<a id="auto-merge-modes"></a>
+Every task that passes review gets a PR. `autoMerge` decides which of them the Lead then merges
+(after the PR's checks pass, never with `--admin`, deleting the remote branch afterwards):
+
+| `autoMerge` | PRs merged automatically |
+| :--- | :--- |
+| `manual` | None — you merge them |
+| `low-risk` (default) | Risk **L** tasks approved in review round 1 and not escalated to the stronger Worker model; in `staged` mode only if every task qualifies |
+| `all` | All of them |
+
+`mergeMethod` is `squash` (default), `merge` or `rebase`. You can change the mode, or a single
+task's Merge value, when you approve the checkpoint.
 
 | Environment variable | Effect |
 | :--- | :--- |
@@ -273,6 +296,10 @@ For repos that deviate, add `.agents/spec-audit.json`:
 | `SAR_STAGE_PREFIX` | Stage branch prefix (default `sar-stage/`) |
 | `SAR_ECOSYSTEM` | Force the runtime ecosystem (`claude`, `gemini`, `codex`) |
 | `SAR_SESSION_SPLIT` | Fresh session for phase 2: `auto` (default; only for multi-task or H-risk runs), `always`, `never` |
+| `SAR_AUTO_MERGE` | `manual`, `low-risk` or `all` (wins over `autoMerge`) |
+| `SAR_MERGE_METHOD` | `squash`, `merge` or `rebase` (wins over `mergeMethod`) |
+| `SAR_PR_TIMEOUT` | Seconds `pr.sh merge` waits for a PR's checks (default `1800`) |
+| `SAR_PR_CHECKS_DELAY` | Seconds before `pr.sh` asks again about a PR with no checks yet (default `20`) |
 | `SAR_LOG_TAIL` | Lines of log `run_logged.sh` prints on failure (default `40`) |
 
 See `skills/spec-audit-and-refactor/scripts/worktree.sh --help` for the full resolution rules.
@@ -286,6 +313,7 @@ All scripts can also be used on their own.
 | [`detect_runtime.sh`](skills/spec-audit-and-refactor/scripts/detect_runtime.sh) | Detect the agent ecosystem and print the phase 1 / phase 2 Lead and Worker models as JSON |
 | [`worktree.sh`](skills/spec-audit-and-refactor/scripts/worktree.sh) | Layout-aware worktree lifecycle: `config`, `path`, `create`, `integrate`, `remove`, `list`, `status`, `provision`, `rundir` |
 | [`run_logged.sh`](skills/spec-audit-and-refactor/scripts/run_logged.sh) | Run a command with its output in a log file; print a one-line summary (plus the tail on failure) and keep the exit code |
+| [`pr.sh`](skills/spec-audit-and-refactor/scripts/pr.sh) | `preflight` / `open` / `merge`: check that PRs can be opened, push a task branch and open (or reuse) its PR, wait for checks and merge it; prints one JSON line |
 | [`check_scope.sh`](skills/spec-audit-and-refactor/scripts/check_scope.sh) | Fail if any changed file falls outside the whitelist; `--list` / `--overlap` show a whitelist's files and overlaps between whitelists at spec time |
 | [`migrate_to_bare.sh`](skills/spec-audit-and-refactor/scripts/migrate_to_bare.sh) | Plan (default) or apply an in-place conversion to the bare-repo worktree layout |
 | [`wt.sh`](skills/spec-audit-and-refactor/scripts/wt.sh) | Everyday branch worktrees in the bare layout — for people, not the Lead; `link-config` re-syncs the agent-config symlinks at the container root |
@@ -334,6 +362,7 @@ bash tests/migrate_bare_test.sh
 bash tests/check_scope_test.sh
 bash tests/run_logged_test.sh
 bash tests/detect_runtime_test.sh
+bash tests/pr_test.sh
 ```
 
 ## Contributing

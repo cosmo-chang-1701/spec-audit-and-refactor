@@ -21,7 +21,7 @@ description: >-
 
 | Role | May | Must not |
 | :--- | :--- | :--- |
-| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; in staged mode, once the user approved it at the checkpoint, commit approved work locally on `sar/*` branches | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand |
+| **Lead** (you) | Read/search code, run tests/linters/builds, write specs, reviews, and run state (in the run dir), create/remove/integrate worktrees via `worktree.sh`; after the user's explicit yes, convert the repo to the bare-repo worktree layout with `migrate_to_bare.sh --apply`; once the user approved it at the checkpoint, commit approved work on `sar/*` branches (in staged mode also between stages), and run `pr.sh open` / `pr.sh merge` to push, open the PR and — per `auto_merge` — merge it | Edit, create, delete, or move any application file — in the main checkout **or** in a worker worktree (sole exception: `migrate_to_bare.sh --apply` as above); resolve merge conflicts by hand; merge a task that was not APPROVEd, use `--admin`, or otherwise get around branch protection |
 | **Worker** (subagent) | Edit files matched by its whitelist, inside its worktree, until the DoD passes | Touch non-whitelisted files, commit/push, or work outside its worktree |
 
 If the Lead is tempted to "just fix it quickly", write it into a spec instead.
@@ -29,7 +29,8 @@ If the Lead is tempted to "just fix it quickly", write it into a spec instead.
 ## Model assignment
 Run `bash SKILL_DIR/scripts/detect_runtime.sh --agent <claude|gemini|codex>` with **your own
 runtime**. It prints the models for each role: `lead` (phase 1), `lead_phase2`, `worker`,
-`worker_light` (small mechanical L-risk tasks), and `scout` (read-only audit sweeps). Roles,
+`worker_light` (small mechanical L-risk tasks), and `scout` (read-only audit sweeps). The
+read-only Reviewer of a Worker's diff runs on `lead`. Roles,
 defaults, overrides, the Critic's model, and the Worker tier rules:
 [references/models.md](references/models.md). If you are not running as the Lead model of the
 current phase, tell the user how to switch (`/model`, `/effort` in Claude Code); do not
@@ -82,7 +83,11 @@ not explain a failure. Never let a full test suite's output into the conversatio
 5. Record the Lead baseline of `source_worktree`:
    `git status --porcelain=v1 && git diff HEAD | sha256sum` — keep the output (it goes into
    `state.json` at the checkpoint).
-6. If `default_base` is not `HEAD`: `git fetch` its remote, then check
+6. `bash SKILL_DIR/scripts/pr.sh preflight` — can PRs be opened (gh installed and logged in,
+   `origin` set)? Note `ok` and `into`; `ok: false` means the run only commits locally, and
+   the checkpoint says so. Note `auto_merge` and `merge_method` from `worktree.sh config`
+   ([execution-plan.md](references/execution-plan.md#auto-merge-modes)).
+7. If `default_base` is not `HEAD`: `git fetch` its remote, then check
    `git rev-parse HEAD` equals `git rev-parse <default_base>`. If not, the audited code
    differs from what Workers will start from — tell the user and agree on the base first.
 
@@ -127,7 +132,9 @@ not explain a failure. Never let a full test suite's output into the conversatio
 - **Show the checkpoint report to the user and wait for approval** before step 3: decision
   matrix, decisions for you, execution plan, then gap report and specs, in the format of
   [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report). In `staged` mode
-  the approval must explicitly cover the inter-stage local commits and merges (no push).
+  the approval must explicitly cover the inter-stage local commits and merges. For every run
+  it must also cover the automatic commit, push, PR and — per the Merge column — merge after
+  APPROVE (wording in [execution-plan.md §3](references/execution-plan.md#3-checkpoint-report)).
 - **Phase boundary** — after approval, write `<run dir>/state.json`
   ([execution-plan.md §7](references/execution-plan.md#7-run-state)) with `phase: 2` and the
   agreed `session`, then:
@@ -156,7 +163,10 @@ and the user chooses to resume. Do not redo steps 0–2.
    `dispatched` or `in-review` has no reachable Worker anymore — re-dispatch it on its
    `worker_tier` with its spec (plus the open findings, if any) into its existing worktree,
    telling the new Worker to keep the uncommitted changes already there
-   ([models.md](references/models.md#worker-tier)).
+   ([models.md](references/models.md#worker-tier)). A task recorded as `approved` continues
+   with its commit; `committed` (with `pr_enabled`) re-runs `pr.sh open` (it reuses an open PR);
+   `pr-open` with `merge: auto`, no `pr_state` and the merge conditions met re-runs `pr.sh merge`
+   ([execution-plan.md §4a](references/execution-plan.md#4a-after-approve-independent-mode)).
 5. Continue at step 3 for `current_stage`.
 
 Steps 3–5 run **once per stage** (`independent` mode = a single stage), in plan order. Keep
@@ -184,12 +194,16 @@ is approved or deferred, and the stage when it is integrated.
    `<slug>-gate-r<round>-<n>.log`). All must exit 0.
 
 ### 5. Review (per task) + stage barrier
-Follow [references/review-checklist.md](references/review-checklist.md): review the diff
-against the recorded base, issue APPROVE or REQUEST_CHANGES with numbered `file:line`
-findings, and loop with the Worker at most **3 rounds**, then escalate to the user.
+Follow [references/review-checklist.md](references/review-checklist.md): the diff is reviewed on
+the `lead` model — in a `split` run by a read-only Reviewer subagent whose findings you verify,
+in a `single` run by you — against the recorded base. Issue APPROVE or REQUEST_CHANGES with
+numbered `file:line` findings, and loop with the Worker at most **3 rounds**, then escalate to
+the user.
 Tasks loop independently of each other. A `light` task that fails round 1 is re-dispatched on
 the `worker` model ([models.md](references/models.md#worker-tier)).
-- `independent`: on APPROVE, ask the user before any commit, push, or `gh pr create`.
+- `independent`: on APPROVE, commit, push and open the PR with `pr.sh`, and merge it when the
+  task's Merge value and `auto_merge` allow — all under the checkpoint approval, with no
+  question ([execution-plan.md §4a](references/execution-plan.md#4a-after-approve-independent-mode)).
 - `staged`: when every task in the stage is APPROVED, commit each locally, run
   `worktree.sh integrate <n> --base <stage base> sar/<slug>...`, and pass the integration
   gate (all of the stage's DoD in the stage worktree) before starting the next stage. See
@@ -200,18 +214,21 @@ the `worker` model ([models.md](references/models.md#worker-tier)).
 ### 6. Close-out
 1. Re-run the baseline command from step 0; it must match. If it does not, report exactly
    what changed in the main checkout — do not "fix" it yourself.
-2. Offer PRs (per task, or for `staged` a single PR from the last `sar-stage/<n>` or stacked
-   per-stage PRs); push or `gh pr create` only with explicit consent.
+2. PRs: `independent` PRs already exist (§5); list each task's PR and whether it is `merged`,
+   `open` (with the reason) or local only. For `staged`, open the single PR from the last
+   `sar-stage/<n>` with `pr.sh` (merge per `auto_merge`, see
+   [execution-plan.md §6](references/execution-plan.md#6-close-out)).
 3. With user consent, `bash SKILL_DIR/scripts/worktree.sh remove <slug>` for every task and
    `remove --stage <n>` for every stage (refuses dirty worktrees without `--force`; task
-   branches are deleted only if merged). Each `remove` first runs `docker compose down`
+   branches are deleted only if merged — a squash or rebase merge does not count, so keep
+   them or `git branch -D` those whose PR is `merged`, with consent). Each `remove` first runs `docker compose down`
    (volumes kept) for Compose projects started only from inside that worktree; a project
    shared with another checkout is left running and reported.
 4. With user consent, `bash SKILL_DIR/scripts/worktree.sh rundir --archive` (keeps the
    plan, specs, and logs as `sar-run.<timestamp>/` in the git common dir; delete it if the
    user prefers).
 5. Final summary: findings addressed, findings deferred (and their blocked dependents),
-   branches/PRs created.
+   branches/PRs created with their state.
 
 ## Scripts and layout
 Script usage and exit codes, the worktree paths per layout, provisioning, and config overrides:

@@ -21,6 +21,10 @@ default). If the current session is on another model, tell the user to switch wi
 (and effort with `/effort`) rather than proceeding silently. Exception: a `single`-session run
 ([SKILL.md](../SKILL.md#sessions-and-context)) dispatches from the phase 1 Lead model.
 
+A Worker's diff is later reviewed by a different, read-only subagent on the `lead` model
+(`lead.dispatch_model`), dispatched by the same phase 2 Lead after the gate; see
+[review-checklist.md](review-checklist.md#reviewer-subagent).
+
 ## Codex CLI (ecosystem: codex)
 ```bash
 codex exec \

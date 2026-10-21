@@ -37,7 +37,10 @@
 #   pathStyle ("slug" | "branch"), defaultBase, sourceWorktree (relative to the anchor),
 #   provision ({"copy": [...], "link": [...], "copyMode": "644"} replaces auto-discovery),
 #   maxParallel (Worker cap read by the Lead, default 4), workerNotes (extra Worker rules),
-#   offerBareLayout (false = never offer migrate_to_bare.sh on a standard repo).
+#   offerBareLayout (false = never offer migrate_to_bare.sh on a standard repo),
+#   autoMerge ("manual" | "low-risk" | "all", default "low-risk"; env SAR_AUTO_MERGE: what
+#   happens to a task's PR once it is open and its review is APPROVE), mergeMethod
+#   ("squash" | "merge" | "rebase", default "squash"; env SAR_MERGE_METHOD).
 #
 # Target root resolution (first hit wins):
 #   1. SAR_WORKTREE_ROOT env, or "worktreeRoot" in the repo config
@@ -386,12 +389,27 @@ cmd_config() {
   python3 - "$CONFIG_FILE" "$LAYOUT" "$REPO_NAME" "$ANCHOR_DIR" "$MAIN_WORKTREE" \
     "$SOURCE_WORKTREE" "$ROOT_DIR" "$RESOLVED_BY" "$PATH_STYLE" "$DEFAULT_BRANCH" \
     "$DEFAULT_BASE" "$BRANCH_PREFIX" "$STAGE_PREFIX" "$PROVISION_FROM" "$COPY_MODE" \
-    "$(printf '%s\n' "${COPIES[@]}")" "$(printf '%s\n' "${LINKS[@]}")" <<'PY'
+    "$(printf '%s\n' "${COPIES[@]}")" "$(printf '%s\n' "${LINKS[@]}")" \
+    "${SAR_AUTO_MERGE:-}" "${SAR_MERGE_METHOD:-}" <<'PY'
 import json, sys
 (config, layout, repo, anchor, main_wt, source, root, resolved_by, path_style,
  default_branch, default_base, branch_prefix, stage_prefix, provision_from, copy_mode,
- copies, links) = sys.argv[1:18]
+ copies, links, env_auto_merge, env_merge_method) = sys.argv[1:20]
 data = json.load(open(config)) if config else {}
+
+def choice(key, env_name, env_value, allowed, default):
+    value = env_value or data.get(key, default)
+    if value not in allowed:
+        where = f"env {env_name}" if env_value else f"{key} in {config}"
+        print(f"worktree: {key} must be one of: {' '.join(allowed)} (got '{value}' from {where})",
+              file=sys.stderr)
+        sys.exit(2)
+    return value
+
+auto_merge = choice("autoMerge", "SAR_AUTO_MERGE", env_auto_merge,
+                    ("manual", "low-risk", "all"), "low-risk")
+merge_method = choice("mergeMethod", "SAR_MERGE_METHOD", env_merge_method,
+                      ("squash", "merge", "rebase"), "squash")
 offer_bare = layout == "standard" and data.get("offerBareLayout", True) is not False
 print(json.dumps({
     "config_file": config or None,
@@ -416,6 +434,8 @@ print(json.dumps({
     "max_parallel": data.get("maxParallel", 4),
     "worker_notes": data.get("workerNotes", []),
     "offer_bare_migration": offer_bare,
+    "auto_merge": auto_merge,
+    "merge_method": merge_method,
 }, ensure_ascii=False, indent=2))
 PY
 }

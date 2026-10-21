@@ -21,6 +21,25 @@ check_eq "maxParallel read from main/.agents/spec-audit.json" \
   "$(cd "$repo" && bash "$W" config | json_get '["max_parallel"]')" 2
 rm -r "$repo/main/.agents"
 
+section "config: autoMerge / mergeMethod"
+cfg_get() { (cd "$std" && bash "$W" config | json_get "$1"); }
+cfgfile=$std/.agents/spec-audit.json
+check_eq "autoMerge defaults to low-risk" "$(cfg_get '["auto_merge"]')" low-risk
+check_eq "mergeMethod defaults to squash" "$(cfg_get '["merge_method"]')" squash
+echo '{"autoMerge": "all", "mergeMethod": "rebase"}' >"$cfgfile"
+check_eq "autoMerge read from the config" "$(cfg_get '["auto_merge"]')" all
+check_eq "mergeMethod read from the config" "$(cfg_get '["merge_method"]')" rebase
+check_eq "SAR_AUTO_MERGE wins over the config" \
+  "$(cd "$std" && SAR_AUTO_MERGE=manual bash "$W" config | json_get '["auto_merge"]')" manual
+check_eq "SAR_MERGE_METHOD wins over the config" \
+  "$(cd "$std" && SAR_MERGE_METHOD=merge bash "$W" config | json_get '["merge_method"]')" merge
+(cd "$std" && SAR_AUTO_MERGE=bogus bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid SAR_AUTO_MERGE: exit 2" "$rc" 2
+echo '{"mergeMethod": "ff"}' >"$cfgfile"
+(cd "$std" && bash "$W" config >/dev/null 2>&1); rc=$?
+check_eq "invalid mergeMethod in the config: exit 2" "$rc" 2
+echo '{"offerBareLayout": false}' >"$cfgfile"
+
 section "status"
 (cd "$repo" && bash "$W" create clean-task >/dev/null 2>&1 && bash "$W" create dirty-task >/dev/null 2>&1)
 check "create provisioned .env" test -f "$repo/sar/clean-task/.env"

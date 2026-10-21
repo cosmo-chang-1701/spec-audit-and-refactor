@@ -14,7 +14,8 @@
 # Roles: "lead" runs phase 1 (preflight, audit, spec, checkpoint); "lead_phase2" runs
 # phase 2 (dispatch, gate, review, close-out) in a fresh session; "worker" implements;
 # "worker_light" implements small mechanical L-risk tasks; "scout" sweeps code read-only
-# during the audit (see references/models.md).
+# during the audit (see references/models.md). The read-only Reviewer of a Worker's diff runs
+# on "lead" (use its dispatch_model).
 # Per-field overrides: SAR_LEAD_MODEL, SAR_LEAD_EFFORT, SAR_LEAD2_MODEL, SAR_LEAD2_EFFORT,
 # SAR_WORKER_MODEL, SAR_WORKER_EFFORT, SAR_WORKER_LIGHT_MODEL, SAR_WORKER_LIGHT_EFFORT,
 # SAR_SCOUT_MODEL, SAR_SCOUT_EFFORT.
@@ -93,23 +94,24 @@ fi
 
 case $ecosystem in
   claude)
-    lead_model=claude-opus-5-5   lead_effort=high
-    lead2_model=claude-sonnet-5-5 lead2_effort=high
+    lead_model=claude-opus-5-5   lead_effort=high   lead_alias=opus
+    lead2_model=claude-sonnet-5-5 lead2_effort=high lead2_alias=sonnet
     worker_model=claude-sonnet-5-5 worker_effort=medium
     worker_alias=sonnet
     light_model=claude-haiku-5-5   light_effort=medium light_alias=haiku
     scout_model=claude-haiku-5-5   scout_effort=low    scout_alias=haiku ;;
   gemini)
     # Antigravity encodes effort in the model id (see `agy models`).
-    lead_model=gemini-4-argon-high     lead_effort=high
-    lead2_model=gemini-3.8-flash-high  lead2_effort=high
+    lead_model=gemini-4-argon-high     lead_effort=high  lead_alias=$lead_model
+    lead2_model=gemini-3.8-flash-high  lead2_effort=high lead2_alias=$lead2_model
     worker_model=gemini-3.8-flash-high worker_effort=high
     worker_alias=gemini-3.8-flash-high
     light_model=$worker_model light_effort=$worker_effort light_alias=$worker_alias
     scout_model=$worker_model scout_effort=$worker_effort scout_alias=$worker_alias ;;
   codex)
     lead_model=$(codex_configured_model) lead_effort=high
-    lead2_model=$lead_model              lead2_effort=$lead_effort
+    lead_alias=$lead_model
+    lead2_model=$lead_model              lead2_effort=$lead_effort lead2_alias=$lead_model
     worker_model=$lead_model             worker_effort=medium
     worker_alias=$lead_model
     light_model=$lead_model              light_effort=low light_alias=$lead_model
@@ -118,8 +120,10 @@ esac
 
 lead_model=${SAR_LEAD_MODEL:-$lead_model}
 lead_effort=${SAR_LEAD_EFFORT:-$lead_effort}
+[[ -n ${SAR_LEAD_MODEL:-} ]] && lead_alias=$SAR_LEAD_MODEL
 lead2_model=${SAR_LEAD2_MODEL:-$lead2_model}
 lead2_effort=${SAR_LEAD2_EFFORT:-$lead2_effort}
+[[ -n ${SAR_LEAD2_MODEL:-} ]] && lead2_alias=$SAR_LEAD2_MODEL
 worker_model=${SAR_WORKER_MODEL:-$worker_model}
 worker_effort=${SAR_WORKER_EFFORT:-$worker_effort}
 [[ -n ${SAR_WORKER_MODEL:-} ]] && worker_alias=$SAR_WORKER_MODEL
@@ -130,10 +134,10 @@ scout_model=${SAR_SCOUT_MODEL:-$scout_model}
 scout_effort=${SAR_SCOUT_EFFORT:-$scout_effort}
 [[ -n ${SAR_SCOUT_MODEL:-} ]] && scout_alias=$SAR_SCOUT_MODEL
 
-printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s"},"lead_phase2":{"model":"%s","effort":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"},"worker_light":{"model":"%s","effort":"%s","dispatch_model":"%s"},"scout":{"model":"%s","effort":"%s","dispatch_model":"%s"},"session_split":"%s"}\n' \
+printf '{"ecosystem":"%s","detected_by":"%s","lead":{"model":"%s","effort":"%s","dispatch_model":"%s"},"lead_phase2":{"model":"%s","effort":"%s","dispatch_model":"%s"},"worker":{"model":"%s","effort":"%s","dispatch_model":"%s"},"worker_light":{"model":"%s","effort":"%s","dispatch_model":"%s"},"scout":{"model":"%s","effort":"%s","dispatch_model":"%s"},"session_split":"%s"}\n' \
   "$ecosystem" "$(json_escape "$detected_by")" \
-  "$(json_escape "$lead_model")" "$(json_escape "$lead_effort")" \
-  "$(json_escape "$lead2_model")" "$(json_escape "$lead2_effort")" \
+  "$(json_escape "$lead_model")" "$(json_escape "$lead_effort")" "$(json_escape "$lead_alias")" \
+  "$(json_escape "$lead2_model")" "$(json_escape "$lead2_effort")" "$(json_escape "$lead2_alias")" \
   "$(json_escape "$worker_model")" "$(json_escape "$worker_effort")" "$(json_escape "$worker_alias")" \
   "$(json_escape "$light_model")" "$(json_escape "$light_effort")" "$(json_escape "$light_alias")" \
   "$(json_escape "$scout_model")" "$(json_escape "$scout_effort")" "$(json_escape "$scout_alias")" \

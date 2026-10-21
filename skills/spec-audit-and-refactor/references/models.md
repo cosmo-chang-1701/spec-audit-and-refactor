@@ -13,10 +13,12 @@ heuristics — e.g. a Claude Code session may also have `GEMINI_API_KEY` set).
 | `worker` | Standard tasks | `claude-sonnet-5-5` · medium | `gemini-3.8-flash-high` · high | same model · medium |
 | `worker_light` | Light tasks ([tiers](#worker-tier)) | `claude-haiku-5-5` · medium | same as `worker` | same model · low |
 | `scout` | Read-only audit sweeps ([scout.md](scout.md)) | `claude-haiku-5-5` · low | same as `worker` | same model · low |
+| Reviewer | Read-only review of a Worker's diff ([review-checklist.md](review-checklist.md#reviewer-subagent)) | `lead` | `lead` | `lead` |
 | Plan Critic | [plan-critic.md](plan-critic.md) | `lead` if any task is H-risk, else `lead_phase2` | same rule | same rule |
 
 Unknown ecosystems fall back to the Claude column. Each block also has `dispatch_model`, the
-value to pass to the runtime's dispatch call (`sonnet`, `haiku` in Claude Code).
+value to pass to the runtime's dispatch call (`opus`, `sonnet`, `haiku` in Claude Code). A
+`single`-session run needs no Reviewer subagent: the Lead already runs on `lead`.
 
 Overrides: `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
 `SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`, `SAR_WORKER_LIGHT_MODEL`, `SAR_WORKER_LIGHT_EFFORT`,
