@@ -200,14 +200,23 @@ commit、push、開 PR 與移除 worktree 一律會先徵求你的同意。
 
 ### 預設模型分配
 
-| 生態系 | Lead · phase 1（稽核、spec、Critic） | Lead · phase 2（派工、檢查、審查） | Worker |
-| :--- | :--- | :--- | :--- |
-| Claude（Claude Code） | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini（Antigravity） | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
-| Codex | `~/.codex/config.toml` 中的 `model` · high | 與 phase 1 相同 | 同一模型 · medium |
+| 生態系 | Lead · phase 1（稽核、spec） | Lead · phase 2（派工、檢查、審查） | Worker | 輕量 Worker | Scout |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Claude（Claude Code） | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium | `claude-haiku-5-5` · medium | `claude-haiku-5-5` · low |
+| Gemini（Antigravity） | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high | 與 Worker 相同 | 與 Worker 相同 |
+| Codex | `~/.codex/config.toml` 中的 `model` · high | 與 phase 1 相同 | 同一模型 · medium | 同一模型 · low | 同一模型 · low |
+
+較便宜的模型只用在工作單純、事後還會再檢查的地方：
+- **輕量 Worker**：任務必須是 L 風險、機械性修改（改名、刪死碼、lint/型別修正）、最多 5 個檔案，
+  且 DoD 能分辨修好與沒修好，才會使用。分級會顯示在 checkpoint 的決策矩陣中；第一輪審查沒通過的
+  輕量任務，會改用 Worker 模型重新派工。
+- **Scout**：稽核範圍很大時，由唯讀的 scout 平行掃描並回傳 `file:line` 線索；phase 1 Lead 會逐一
+  驗證線索，所有判斷仍由 Lead 負責。
+- **Plan Critic**：只有在有 H 風險任務時才使用 phase 1 的 Lead 模型，否則使用 phase 2 的 Lead 模型。
 
 可用 `SAR_LEAD_MODEL`、`SAR_LEAD_EFFORT`、`SAR_LEAD2_MODEL`、`SAR_LEAD2_EFFORT`、
-`SAR_WORKER_MODEL`、`SAR_WORKER_EFFORT` 覆寫。
+`SAR_WORKER_MODEL`、`SAR_WORKER_EFFORT`、`SAR_WORKER_LIGHT_MODEL`、`SAR_WORKER_LIGHT_EFFORT`、
+`SAR_SCOUT_MODEL`、`SAR_SCOUT_EFFORT` 覆寫。詳見 [models.md](skills/spec-audit-and-refactor/references/models.md)。
 
 ## 設定
 
@@ -283,8 +292,11 @@ tests/auth/          # 結尾的 / 代表整個目錄
 │       │   ├── bare-layout.md           # bare-repo 佈局與轉換提問的格式
 │       │   ├── dispatch.md              # 各執行環境的 Worker 派工方式
 │       │   ├── execution-plan.md        # 相依性分析、執行模式、checkpoint 呈報格式與執行狀態
+│       │   ├── models.md                # 各角色的模型、Worker 分級與升級規則
 │       │   ├── plan-critic.md           # 對 spec 的唯讀對抗式審查
 │       │   ├── review-checklist.md      # diff 審查與判定格式
+│       │   ├── scout.md                 # 以便宜模型進行的唯讀稽核掃描
+│       │   ├── scripts-and-layout.md    # 腳本 exit code、worktree 佈局與設定覆寫
 │       │   └── worker-spec-template.md  # 交給每個 Worker 的 spec 範本
 │       └── scripts/             # Bash 輔助腳本（見上方）
 ├── tests/                       # 在拋棄式 repo 中執行的腳本測試（不會被安裝）
