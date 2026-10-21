@@ -92,25 +92,25 @@ flowchart LR
 1. **前置檢查**：偵測執行環境與 worktree 佈局、檢查先前遺留的任務、記錄 Lead checkout 的基準狀態。
 2. **稽核**：掃描議定的範圍，執行既有的 lint / test / type-check 指令，撰寫缺口報告，並將發現
    分組為白名單小且互不重疊的任務。
-3. **Spec**：為每個任務填寫 [spec 範本](references/worker-spec-template.md)，並擬定
-   [執行計畫](references/execution-plan.md)（`independent` 或 `staged`）。接著檢查白名單是否
+3. **Spec**：為每個任務填寫 [spec 範本](skills/spec-audit-and-refactor/references/worker-spec-template.md)，並擬定
+   [執行計畫](skills/spec-audit-and-refactor/references/execution-plan.md)（`independent` 或 `staged`）。接著檢查白名單是否
    重疊、預先執行每條 DoD 指令以找出無效或無法達成的指令；任務較多或風險較高時，再由唯讀的
-   [Plan Critic](references/plan-critic.md) 挑戰 spec。呈報時先給使用者決策矩陣（各任務的範圍、
+   [Plan Critic](skills/spec-audit-and-refactor/references/plan-critic.md) 挑戰 spec。呈報時先給使用者決策矩陣（各任務的範圍、
    風險與共用資源），再附完整 spec。**使用者核准前不會派出任何 Worker。**
    核准後，Lead 把 `state.json` 寫入 run dir 並結束 phase 1：執行 `/clear`、切換到 phase 2 的
    Lead 模型，再以 `resume` 呼叫本 skill。新的 session 會先核對基準狀態與 base commit，只讀取
    執行計畫與當前階段的 spec，然後接續執行。小型流程（單一任務、風險 L 或 M）則不換 session，
    直接以 phase 1 的 Lead 模型繼續；可設定 `SAR_SESSION_SPLIT=always|never`，或在核准時說明來改變。
 4. **Worktree + 派工**：為每個任務在 `sar/<slug>` 分支上建立 worktree，並平行派出該階段的
-   Worker（詳見 [dispatch.md](references/dispatch.md)）。
+   Worker（詳見 [dispatch.md](skills/spec-audit-and-refactor/references/dispatch.md)）。
 5. **檢查**：執行 `check_scope.sh`，再透過 `run_logged.sh` 重新執行所有 DoD 指令，全部都必須通過。
-6. **審查**：依照[審查清單](references/review-checklist.md)，對照記錄的基準審查 diff。
+6. **審查**：依照[審查清單](skills/spec-audit-and-refactor/references/review-checklist.md)，對照記錄的基準審查 diff。
    在 staged 模式下，核准的任務會先在本機 commit 並合併到 `sar-stage/<n>`，才進入下一階段；
    階段之間也可以再換到新的 session 繼續。
 7. **收尾**：確認基準狀態未變、提供建立 PR 的選項、移除 worktree，並封存 run dir。
    push、開 PR 與刪除 worktree 都需要使用者明確同意。
 
-完整流程請見 [SKILL.md](SKILL.md)。
+完整流程請見 [SKILL.md](skills/spec-audit-and-refactor/SKILL.md)。
 
 ## 系統需求
 
@@ -118,23 +118,49 @@ flowchart LR
 - **python3**（用於讀取與輸出 JSON 設定）
 - 支援 skill 與 subagent 的 agent 執行環境：
   [Claude Code](https://docs.claude.com/en/docs/claude-code)、Codex CLI 或 Antigravity CLI
+- 選用：[Node.js](https://nodejs.org/) ≥ 22（僅 `npx skills` 安裝方式需要）
 - 選用：[GitHub CLI](https://cli.github.com/)（`gh`），用於收尾時開 PR
 
 ## 安裝
 
-將 repository clone 到 agent 的 skills 目錄：
+使用 [`skills` CLI](https://github.com/vercel-labs/skills) 安裝：
 
 ```bash
-# 共用 skills 目錄
-git clone https://github.com/cosmo-chang-1701/spec-audit-and-refactor.git \
-  ~/.agents/skills/spec-audit-and-refactor
+# 目前專案：安裝到 .agents/skills/，並連結 .claude/skills/ 等目錄
+npx skills add cosmo-chang-1701/spec-audit-and-refactor
 
-# Claude Code 從 ~/.claude/skills 讀取個人 skills
-ln -s ~/.agents/skills/spec-audit-and-refactor ~/.claude/skills/spec-audit-and-refactor
+# 所有專案：安裝到 ~/.agents/skills/spec-audit-and-refactor，並連結 ~/.claude/skills/
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -g
+
+# 明確指定 agent
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -a claude-code -a codex
+
+# 預覽將安裝的內容
+npx skills add cosmo-chang-1701/spec-audit-and-refactor --list
+
+# 更新 / 解除安裝
+npx skills update
+npx skills remove spec-audit-and-refactor
 ```
 
-若只想用於單一專案，請將目錄放在（或 symlink 到）該專案的 skills 目錄下，例如
-`.claude/skills/spec-audit-and-refactor`。
+只有 `skills/spec-audit-and-refactor/` 目錄會被安裝；README、LICENSE 與 `tests/` 只留在
+repository 中。
+
+### 手動 / 開發安裝
+
+repository 根目錄不再是一個 skill，因此**不要**把它 clone 到
+`~/.agents/skills/spec-audit-and-refactor`（`npx skills add -g` 也是寫入該路徑）。
+請 clone 到其他位置，再以 symlink 連結 skill 目錄：
+
+```bash
+git clone https://github.com/cosmo-chang-1701/spec-audit-and-refactor.git \
+  ~/src/spec-audit-and-refactor
+
+ln -s ~/src/spec-audit-and-refactor/skills/spec-audit-and-refactor \
+  ~/.agents/skills/spec-audit-and-refactor
+ln -s ~/src/spec-audit-and-refactor/skills/spec-audit-and-refactor \
+  ~/.claude/skills/spec-audit-and-refactor
+```
 
 ## 使用方式
 
@@ -209,7 +235,7 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 | `SAR_SESSION_SPLIT` | phase 2 是否換新 session：`auto`（預設；僅多任務或 H 風險時）、`always`、`never` |
 | `SAR_LOG_TAIL` | `run_logged.sh` 失敗時印出的 log 行數（預設 `40`） |
 
-完整的解析規則請執行 `scripts/worktree.sh --help`。
+完整的解析規則請執行 `skills/spec-audit-and-refactor/scripts/worktree.sh --help`。
 
 ## 腳本
 
@@ -217,12 +243,12 @@ git common dir 內，所以永遠不會被當成變更、所有 worktree 共用�
 
 | 腳本 | 用途 |
 | :--- | :--- |
-| [`detect_runtime.sh`](scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 phase 1 / phase 2 的 Lead 與 Worker 模型 |
-| [`worktree.sh`](scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir` |
-| [`run_logged.sh`](scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
-| [`check_scope.sh`](scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
-| [`migrate_to_bare.sh`](scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
-| [`wt.sh`](scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead；`link-config` 重新同步容器根目錄的 agent 設定 symlink |
+| [`detect_runtime.sh`](skills/spec-audit-and-refactor/scripts/detect_runtime.sh) | 偵測 agent 生態系，並以 JSON 輸出 phase 1 / phase 2 的 Lead 與 Worker 模型 |
+| [`worktree.sh`](skills/spec-audit-and-refactor/scripts/worktree.sh) | 感知佈局的 worktree 生命週期管理：`config`、`path`、`create`、`integrate`、`remove`、`list`、`status`、`provision`、`rundir` |
+| [`run_logged.sh`](skills/spec-audit-and-refactor/scripts/run_logged.sh) | 執行指令並把輸出寫入 log 檔；只印一行摘要（失敗時附最後幾行），並保留原本的 exit code |
+| [`check_scope.sh`](skills/spec-audit-and-refactor/scripts/check_scope.sh) | 有任何變更檔案超出白名單時回傳失敗；`--list` / `--overlap` 可在撰寫 spec 時列出白名單涵蓋的檔案與白名單之間的重疊 |
+| [`migrate_to_bare.sh`](skills/spec-audit-and-refactor/scripts/migrate_to_bare.sh) | 規劃（預設）或執行就地轉換為 bare-repo worktree 佈局 |
+| [`wt.sh`](skills/spec-audit-and-refactor/scripts/wt.sh) | 在 bare 佈局中管理日常分支 worktree——供人使用，而非 Lead；`link-config` 重新同步容器根目錄的 agent 設定 symlink |
 
 `check_scope.sh` 使用的白名單格式：
 
@@ -237,16 +263,21 @@ tests/auth/          # 結尾的 / 代表整個目錄
 
 ```text
 .
-├── SKILL.md                     # agent 讀取的進入點
-├── references/
-│   ├── bare-layout.md           # bare-repo 佈局與轉換提問的格式
-│   ├── dispatch.md              # 各執行環境的 Worker 派工方式
-│   ├── execution-plan.md        # 相依性分析、執行模式、checkpoint 呈報格式與執行狀態
-│   ├── plan-critic.md           # 對 spec 的唯讀對抗式審查
-│   ├── review-checklist.md      # diff 審查與判定格式
-│   └── worker-spec-template.md  # 交給每個 Worker 的 spec 範本
-├── scripts/                     # Bash 輔助腳本（見上方）
-└── tests/                       # 在拋棄式 repo 中執行的腳本測試
+├── skills/
+│   └── spec-audit-and-refactor/ # skill 本體：唯一會被安裝的部分
+│       ├── SKILL.md             # agent 讀取的進入點
+│       ├── references/
+│       │   ├── bare-layout.md           # bare-repo 佈局與轉換提問的格式
+│       │   ├── dispatch.md              # 各執行環境的 Worker 派工方式
+│       │   ├── execution-plan.md        # 相依性分析、執行模式、checkpoint 呈報格式與執行狀態
+│       │   ├── plan-critic.md           # 對 spec 的唯讀對抗式審查
+│       │   ├── review-checklist.md      # diff 審查與判定格式
+│       │   └── worker-spec-template.md  # 交給每個 Worker 的 spec 範本
+│       └── scripts/             # Bash 輔助腳本（見上方）
+├── tests/                       # 在拋棄式 repo 中執行的腳本測試（不會被安裝）
+├── README.md
+├── README.zh-TW.md
+└── LICENSE
 ```
 
 ## 測試
@@ -267,7 +298,7 @@ bash tests/detect_runtime_test.sh
 
 1. 腳本維持使用 Bash 並加上 `set -euo pipefail`，與現有風格一致。
 2. 修改任何腳本時，請在 `tests/` 新增或更新測試，並確認所有測試都通過。
-3. 讓 `SKILL.md` 與 `references/` 下的檔案和腳本行為保持一致。
+3. 讓 `skills/spec-audit-and-refactor/SKILL.md` 與 `skills/spec-audit-and-refactor/references/` 下的檔案和腳本行為保持一致。
 
 ## 授權條款
 

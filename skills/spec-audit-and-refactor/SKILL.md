@@ -228,9 +228,7 @@ Tasks loop independently of each other.
 | `scripts/migrate_to_bare.sh [--apply]` | Plan (default) or perform the in-place conversion to the bare-repo worktree layout; see [references/bare-layout.md](references/bare-layout.md) | 0 ok, 1 blocked, 2 failed + rolled back, 3 rollback incomplete |
 | `scripts/wt.sh add\|remove\|list\|status\|link-config` | For people, not the Lead: everyday branch worktrees in the bare layout; `link-config` re-syncs the agent-config symlinks at the container root | 0 ok, 1 dirty/missing (`status --check`), 2 error |
 
-Script tests (throwaway repos in a temp dir only): `bash SKILL_DIR/tests/migrate_bare_test.sh`,
-`bash SKILL_DIR/tests/worktree_test.sh`, `bash SKILL_DIR/tests/check_scope_test.sh`,
-`bash SKILL_DIR/tests/run_logged_test.sh`, `bash SKILL_DIR/tests/detect_runtime_test.sh`.
+The script tests live in the source repository's `tests/` directory, not in the installed skill.
 
 ## Worktree layout
 Detected automatically; nothing to configure per repo. A standard repo can be converted to

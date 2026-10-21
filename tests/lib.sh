@@ -3,7 +3,7 @@
 # shellcheck shell=bash
 set -uo pipefail
 
-SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../skills/spec-audit-and-refactor" && pwd)
 SCRIPTS=$SKILL_DIR/scripts
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/sar-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
