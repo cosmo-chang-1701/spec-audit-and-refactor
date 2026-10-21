@@ -27,24 +27,13 @@ description: >-
 If the Lead is tempted to "just fix it quickly", write it into a spec instead.
 
 ## Model assignment
-
 Run `bash SKILL_DIR/scripts/detect_runtime.sh --agent <claude|gemini|codex>` with **your own
-runtime** (you know which CLI you are running in; the flag beats env heuristics — e.g. a
-Claude Code session may also have `GEMINI_API_KEY` set). Defaults:
-
-| Ecosystem | Lead · phase 1 (`lead`) | Lead · phase 2 (`lead_phase2`) | Worker |
-| :--- | :--- | :--- | :--- |
-| Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini (Antigravity) | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
-| Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium |
-| Fallback | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-
-Overrides: `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
-`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`, and `SAR_SESSION_SPLIT` (see
-[Sessions and context](#sessions-and-context)).
-If you are not running as the Lead model of the current phase, tell the user how to switch
-(`/model`, `/effort` in Claude Code); do not silently continue. Exception: a `single`-session
-run keeps the phase 1 Lead model for phase 2.
+runtime**. It prints the models for each role: `lead` (phase 1), `lead_phase2`, `worker`,
+`worker_light` (small mechanical L-risk tasks), and `scout` (read-only audit sweeps). Roles,
+defaults, overrides, the Critic's model, and the Worker tier rules:
+[references/models.md](references/models.md). If you are not running as the Lead model of the
+current phase, tell the user how to switch (`/model`, `/effort` in Claude Code); do not
+silently continue — except in a `single`-session run, which keeps the phase 1 Lead model.
 
 ## Sessions and context
 - **Phase 1** — steps 0–2 (preflight, audit, spec, checkpoint) on the phase 1 Lead model.
@@ -76,7 +65,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
 ### 0. Preflight
 1. `detect_runtime.sh` as above; note the `worker` block and `session_split`.
 2. `bash SKILL_DIR/scripts/worktree.sh config` — the detected layout and its defaults
-   (see [Worktree layout](#worktree-layout)); no per-repo setup is needed. Note
+   (see [scripts-and-layout.md](references/scripts-and-layout.md#worktree-layout)); no
+   per-repo setup is needed. Note
    `source_worktree`, `default_base`, `provision`, `max_parallel`, and `offer_bare_migration`.
    In a bare layout run every Lead git/test command inside `source_worktree` (the container
    root is not a work tree).
@@ -98,8 +88,9 @@ not explain a failure. Never let a full test suite's output into the conversatio
 
 ### 1. Audit (read-only)
 - Establish scope with the user (paths, concern: security / perf / debt / spec gaps).
-- Scan statically; run the project's existing lint/test/type-check commands to get
-  ground truth, each through `run_logged.sh` (logs `audit-<n>.log`). Do not install tools or
+- Scan statically — for a large scope, sweep it first with parallel read-only scouts per
+  [references/scout.md](references/scout.md) and verify their leads. Run the project's
+  existing lint/test/type-check commands to get ground truth, each through `run_logged.sh` (logs `audit-<n>.log`). Do not install tools or
   change config to do so.
 - Produce a **gap report**: numbered findings, each with `file:line`, severity, evidence,
   and a proposed fix. Group findings into tasks that can each be done by one Worker with
@@ -112,7 +103,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
 
 ### 2. Spec (checkpoint)
 - For each task, fill [references/worker-spec-template.md](references/worker-spec-template.md):
-  slug, goal, context, whitelist, forbidden, DoD commands (and stage/dependencies).
+  slug, goal, context, whitelist, forbidden, DoD commands (and stage/dependencies), and pick
+  its Worker tier (`light` / `standard`, [models.md](references/models.md#worker-tier)).
   Fill the spec's **Repo rules** from the repo's agent docs (`AGENTS.md`, `CLAUDE.md`, and
   the ones in directories the whitelist touches): how to run tests/lint/type checks,
   required flags, language rules. Add pitfalls you know about this repo from your own
@@ -129,7 +121,8 @@ not explain a failure. Never let a full test suite's output into the conversatio
   note the class in the spec; fix `BROKEN` commands. Stage 2+ tasks are dry-run at step 3. See
   [worker-spec-template.md](references/worker-spec-template.md#dod-dry-run).
 - **Plan Critic** — with 2+ tasks, `staged` mode, an H-risk task, or on request: dispatch a
-  read-only critic and decide on each finding per
+  read-only critic (`lead` model only if a task is H-risk, else `lead_phase2`) and decide
+  on each finding per
   [references/plan-critic.md](references/plan-critic.md). One round.
 - **Show the checkpoint report to the user and wait for approval** before step 3: decision
   matrix, decisions for you, execution plan, then gap report and specs, in the format of
@@ -160,8 +153,10 @@ and the user chooses to resume. Do not redo steps 0–2.
    it is remote). On any mismatch stop and ask the user — the plan was approved for that code.
 4. `worktree.sh status`: compare with the task states in `state.json`. Worktrees of the
    current stage that already exist are reused, not re-created; a task recorded as
-   `dispatched` or `in-review` has no reachable Worker anymore — re-dispatch it with its spec
-   (plus the open findings, if any) into its existing worktree.
+   `dispatched` or `in-review` has no reachable Worker anymore — re-dispatch it on its
+   `worker_tier` with its spec (plus the open findings, if any) into its existing worktree,
+   telling the new Worker to keep the uncommitted changes already there
+   ([models.md](references/models.md#worker-tier)).
 5. Continue at step 3 for `current_stage`.
 
 Steps 3–5 run **once per stage** (`independent` mode = a single stage), in plan order. Keep
@@ -179,8 +174,8 @@ is approved or deferred, and the stage when it is integrated.
    new worktree through `run_logged.sh` before dispatch (path/flag fixes only; anything
    else goes back to the user).
 2. Insert the worktree path and base into each spec, then dispatch **all of the stage's
-   Workers in parallel** per [references/dispatch.md](references/dispatch.md) using the
-   Worker model/effort (concurrency cap = `max_parallel`).
+   Workers in parallel** per [references/dispatch.md](references/dispatch.md), each on the
+   model of its `worker_tier` (`worker` or `worker_light`; concurrency cap = `max_parallel`).
 
 ### 4. Gate (per task)
 1. `bash SKILL_DIR/scripts/check_scope.sh <worktree> <whitelist-file>` — must exit 0.
@@ -192,7 +187,8 @@ is approved or deferred, and the stage when it is integrated.
 Follow [references/review-checklist.md](references/review-checklist.md): review the diff
 against the recorded base, issue APPROVE or REQUEST_CHANGES with numbered `file:line`
 findings, and loop with the Worker at most **3 rounds**, then escalate to the user.
-Tasks loop independently of each other.
+Tasks loop independently of each other. A `light` task that fails round 1 is re-dispatched on
+the `worker` model ([models.md](references/models.md#worker-tier)).
 - `independent`: on APPROVE, ask the user before any commit, push, or `gh pr create`.
 - `staged`: when every task in the stage is APPROVED, commit each locally, run
   `worktree.sh integrate <n> --base <stage base> sar/<slug>...`, and pass the integration
@@ -217,42 +213,6 @@ Tasks loop independently of each other.
 5. Final summary: findings addressed, findings deferred (and their blocked dependents),
    branches/PRs created.
 
-## Script reference
-| Script | Purpose | Exit codes |
-| :--- | :--- | :--- |
-| `scripts/detect_runtime.sh [--agent X]` | Ecosystem + model JSON | 0 ok, 2 usage |
-| `scripts/worktree.sh config\|path\|create\|integrate\|remove\|list\|status\|provision\|rundir` | Layout-aware worktree lifecycle with auto-provisioning; `integrate` builds a stage's `sar-stage/<n>` branch; `status` adds state, base, ahead count and change counts per task/stage; `rundir [--archive]` creates (or archives) the persistent run dir; `remove` runs `docker compose down` for the worktree's own Compose projects first (`SAR_COMPOSE_DOWN=0` disables) | 0 ok, 1 merge conflict (`integrate`) or dirty/missing (`status --check`), 2 error |
-| `scripts/run_logged.sh <log> '<command>'` | Runs a command with its output in a log file; prints a one-line summary (plus the tail on failure) | the command's exit code, 2 usage |
-| `scripts/check_scope.sh <wt> <whitelist> [--base ref]` | Whitelist gate on all changes | 0 ok, 1 violations, 2 usage |
-| `scripts/check_scope.sh --list <dir> <whitelist>` · `--overlap <dir> <whitelist>...` | Spec-time: tracked files a whitelist covers · files (`OVERLAP`) and patterns (`POSSIBLE`) shared between whitelists | 0 ok, 1 `OVERLAP` found, 2 usage |
-| `scripts/migrate_to_bare.sh [--apply]` | Plan (default) or perform the in-place conversion to the bare-repo worktree layout; see [references/bare-layout.md](references/bare-layout.md) | 0 ok, 1 blocked, 2 failed + rolled back, 3 rollback incomplete |
-| `scripts/wt.sh add\|remove\|list\|status\|link-config` | For people, not the Lead: everyday branch worktrees in the bare layout; `link-config` re-syncs the agent-config symlinks at the container root | 0 ok, 1 dirty/missing (`status --check`), 2 error |
-
-The script tests live in the source repository's `tests/` directory, not in the installed skill.
-
-## Worktree layout
-Detected automatically; nothing to configure per repo. A standard repo can be converted to
-the bare layout in place (preflight step 4, [references/bare-layout.md](references/bare-layout.md)).
-
-| | Bare container (`<root>/.bare` + `<root>/main/`) | Standard repo (`.git` in the checkout) |
-| :--- | :--- | :--- |
-| Task worktree | `<root>/sar/<slug>` (dir = branch name) | `<parent>/worktrees/<repo>/<slug>` |
-| Stage worktree | `<root>/sar-stage/<id>` | `<parent>/worktrees/<repo>/_stage-<id>` |
-| Source (Lead's checkout) | worktree on the default branch, e.g. `<root>/main` | the main checkout |
-| Default base | `origin/<default branch>` (else `<default branch>`) | `HEAD` |
-
-Provisioning (both layouts): each new task/stage worktree gets the source worktree's
-gitignored, untracked `.env` / `.env.*` files copied (mode kept) and `.venv` dirs symlinked,
-so tests run there like in the source. Paths not gitignored in the new worktree are
-skipped and never become changes. Disable with `SAR_PROVISION=0`. Workers must not edit
-these files or install into a linked venv (it is the source worktree's) — the spec
-template says so.
-
-Overrides, only for a repo that deviates: env `SAR_WORKTREE_ROOT`, or
-`.agents/spec-audit.json` (in `SAR_CONFIG`, the worktree toplevel, or — bare layout — the
-default-branch worktree or the container root) with keys `worktreeRoot`, `pathStyle`
-(`slug`|`branch`), `defaultBase`, `sourceWorktree`, `provision`
-(`{"copy": [...], "link": [...], "copyMode": "644"}`, replaces auto-discovery),
-`maxParallel`, `workerNotes`, `offerBareLayout` (`false` = never offer the conversion);
-see `worktree.sh --help`.
-Branch prefixes: `SAR_BRANCH_PREFIX` (tasks, default `sar/`), `SAR_STAGE_PREFIX` (stages, default `sar-stage/`).
+## Scripts and layout
+Script usage and exit codes, the worktree paths per layout, provisioning, and config overrides:
+[references/scripts-and-layout.md](references/scripts-and-layout.md).

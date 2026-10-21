@@ -1,14 +1,16 @@
 # Dispatching the Worker
 
-Use the `worker` block from `detect_runtime.sh`. Always pass the **complete spec** (the
+Use the `detect_runtime.sh` block of the task's `worker_tier`: `worker` for `standard`,
+`worker_light` for `light` ([models.md](models.md#worker-tier)). Always pass the **complete spec** (the
 Worker cannot see the Lead's context) and the worktree's **absolute path**.
 
 ## Claude Code (ecosystem: claude)
 Use the subagent tool (`Agent` / `Task`), not a shell call:
 
 - `subagent_type`: `general-purpose` (needs edit + bash tools)
-- `model`: `sonnet` (the `dispatch_model` value)
-- `effort`: `medium` — this skill explicitly requests it
+- `model`: the tier's `dispatch_model` (`sonnet` / `haiku`)
+- `effort`: the tier's `effort` — this skill explicitly requests it (omit it only if the
+  runtime rejects it for that model)
 - `prompt`: the filled spec. It must state the worktree path as the working root; the
   subagent starts in the Lead's cwd, so the spec must tell it to use absolute paths
   under the worktree (or `cd` there in each shell command).
@@ -23,8 +25,8 @@ default). If the current session is on another model, tell the user to switch wi
 ```bash
 codex exec \
   -C "<worktree>" \
-  -m "<worker.model>" \
-  -c model_reasoning_effort="<worker.effort>" \
+  -m "<tier.model>" \
+  -c model_reasoning_effort="<tier.effort>" \
   -s workspace-write \
   -o "<run dir>/worker-<slug>.md" \
   - < "<run dir>/spec-<slug>.md"
@@ -34,7 +36,7 @@ codex exec \
 ## Antigravity CLI (ecosystem: gemini)
 ```bash
 (cd "<worktree>" && agy -p "$(cat "<run dir>/spec-<slug>.md")" \
-  --model "<worker.dispatch_model>" \
+  --model "<tier.dispatch_model>" \
   --mode accept-edits \
   --output-format text) > "<run dir>/worker-<slug>.md"
 ```
@@ -62,7 +64,9 @@ Respect the concurrency cap (`max_parallel`, default 4); dispatch the rest as ea
   ```
   (Same pattern for `agy`, one `(cd <worktree> && agy ...) > <report> &` per task.)
 - Review rounds go back to the same Worker for that task only (`SendMessage` to its agent
-  in Claude Code; a new `codex exec` / `agy` run in the same worktree otherwise).
+  in Claude Code; a new `codex exec` / `agy` run in the same worktree otherwise). Escalating
+  a `light` task to `standard` is always a new dispatch on the `worker` model (a message keeps
+  the old model): full spec plus `open_findings`, same worktree.
 
 ## Any runtime
 - Keep spec and report files in the run dir (`worktree.sh rundir`), never inside the

@@ -32,11 +32,12 @@ Lead the report with what needs a human decision; put the detail last. Always in
 
 **① Decision matrix** — one row per task:
 
-| Task | Findings | Scope | Stage ← deps | Risk | Shared resources | DoD baseline | Critic |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| fix-auth-token | #1, #4 | `src/auth/` · 6 files | 1 | H — auth | — | 1 FAIL-EXPECTED · 2 PASS | 1 accepted |
-| add-rate-limit | #2 | `src/api/middleware/` · 3 files | 1 | M | Redis (compose) | 1 NOT-YET · 2 PASS | — |
-| migrate-callers | #3 | `src/api/routes/` · 11 files | 2 ← fix-auth-token | M | `routes/index.py` POSSIBLE | 2 PASS · 1 FAIL-EXPECTED | 1 rejected (H) |
+| Task | Findings | Scope | Stage ← deps | Risk | Worker | Shared resources | DoD baseline | Critic |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| fix-auth-token | #1, #4 | `src/auth/` · 6 files | 1 | H — auth | standard | — | 1 FAIL-EXPECTED · 2 PASS | 1 accepted |
+| add-rate-limit | #2 | `src/api/middleware/` · 3 files | 1 | M | standard | Redis (compose) | 1 NOT-YET · 2 PASS | — |
+| drop-dead-helpers | #5 | `src/utils/` · 2 files | 1 | L | light | — | 1 FAIL-EXPECTED · 1 PASS | — |
+| migrate-callers | #3 | `src/api/routes/` · 11 files | 2 ← fix-auth-token | M | standard | `routes/index.py` POSSIBLE | 2 PASS · 1 FAIL-EXPECTED | 1 rejected (H) |
 
 - **Scope**: top directories of the whitelist and the file count from
   `check_scope.sh --list <source_worktree> <slug>.wl`.
@@ -45,6 +46,8 @@ Lead the report with what needs a human decision; put the detail last. Always in
     changed code has no existing tests;
   - **M**: crosses modules, or changes behaviour that existing tests cover;
   - **L**: local, behaviour-preserving, covered by tests.
+- **Worker**: `light` or `standard` per [models.md](models.md#worker-tier); the user may
+  override it with the approval.
 - **Shared resources**:
   - static: `OVERLAP` / `POSSIBLE` lines from `check_scope.sh --overlap`, lockfiles,
     migrations, common fixtures;
@@ -65,7 +68,7 @@ that reaches beyond the files the findings name, and every unresolved `POSSIBLE`
 **③ Execution plan**:
 ```text
 Mode: staged · max parallel 4
-Stage 1 (base origin/main 1a2b3c4): fix-auth-token, add-rate-limit       [parallel]
+Stage 1 (base origin/main 1a2b3c4): fix-auth-token, add-rate-limit, drop-dead-helpers  [parallel]
 Stage 2 (base sar-stage/1):  migrate-callers ← fix-auth-token
 Stage 3 (base sar-stage/2):  drop-legacy-auth ← migrate-callers
 Inter-stage: local commits on sar/* and sar-stage/* branches, merges via worktree.sh integrate; no push
@@ -144,11 +147,11 @@ It records facts only — decisions stay in `plan.md` and the specs.
   "max_parallel": 4,
   "current_stage": 1,
   "stages": [
-    {"n": 1, "status": "pending", "tasks": ["fix-auth-token", "add-rate-limit"]},
+    {"n": 1, "status": "pending", "tasks": ["fix-auth-token", "add-rate-limit", "drop-dead-helpers"]},
     {"n": 2, "status": "pending", "tasks": ["migrate-callers"]}
   ],
   "tasks": {
-    "fix-auth-token": {"stage": 1, "status": "pending", "round": 0, "worktree": null, "open_findings": []}
+    "fix-auth-token": {"stage": 1, "status": "pending", "worker_tier": "standard", "round": 0, "worktree": null, "open_findings": []}
   }
 }
 ```
@@ -159,5 +162,7 @@ It records facts only — decisions stay in `plan.md` and the specs.
 - Task status: `pending` → `dispatched` → `in-review` (with `round`) → `approved` →
   `committed`, or `deferred` / `escalated`. `open_findings` holds the blocking findings of the
   last REQUEST_CHANGES, so a resumed session can re-dispatch with them.
+- `worker_tier`: `light` or `standard` ([models.md](models.md#worker-tier)); set to
+  `standard` when a `light` task is escalated, and a resumed session dispatches on that tier.
 - `approval` quotes what the user approved at the checkpoint; a resumed Lead never assumes
   more than it says.

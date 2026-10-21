@@ -14,6 +14,12 @@ check_eq "phase 2 lead effort" "$(json_get '["lead_phase2"]["effort"]' <<<"$out"
 check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" claude-sonnet-5-5
 check_eq "worker effort" "$(json_get '["worker"]["effort"]' <<<"$out")" medium
 check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" sonnet
+check_eq "light worker model" "$(json_get '["worker_light"]["model"]' <<<"$out")" claude-haiku-5-5
+check_eq "light worker effort" "$(json_get '["worker_light"]["effort"]' <<<"$out")" medium
+check_eq "light worker dispatch alias" "$(json_get '["worker_light"]["dispatch_model"]' <<<"$out")" haiku
+check_eq "scout model" "$(json_get '["scout"]["model"]' <<<"$out")" claude-haiku-5-5
+check_eq "scout effort" "$(json_get '["scout"]["effort"]' <<<"$out")" low
+check_eq "scout dispatch alias" "$(json_get '["scout"]["dispatch_model"]' <<<"$out")" haiku
 
 section "gemini defaults"
 AGENT=gemini; out=$(run)
@@ -22,10 +28,15 @@ check_eq "phase 2 lead model" "$(json_get '["lead_phase2"]["model"]' <<<"$out")"
 check_eq "phase 2 lead effort" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" high
 check_eq "worker model" "$(json_get '["worker"]["model"]' <<<"$out")" gemini-3.8-flash-high
 check_eq "worker dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" gemini-3.8-flash-high
+check_eq "light worker = worker" "$(json_get '["worker_light"]' <<<"$out")" "$(json_get '["worker"]' <<<"$out")"
+check_eq "scout = worker" "$(json_get '["scout"]' <<<"$out")" "$(json_get '["worker"]' <<<"$out")"
 
 section "codex: phase 2 lead = lead"
 AGENT=codex; out=$(run)
 check_eq "codex" "$(json_get '["lead_phase2"]' <<<"$out")" "$(json_get '["lead"]' <<<"$out")"
+check_eq "light worker: same model" "$(json_get '["worker_light"]["model"]' <<<"$out")" "$(json_get '["lead"]["model"]' <<<"$out")"
+check_eq "light worker effort" "$(json_get '["worker_light"]["effort"]' <<<"$out")" low
+check_eq "scout effort" "$(json_get '["scout"]["effort"]' <<<"$out")" low
 
 section "overrides"
 AGENT=claude; out=$(run SAR_LEAD2_MODEL=claude-opus-5-5 SAR_LEAD2_EFFORT=medium SAR_LEAD_EFFORT=max SAR_WORKER_MODEL=haiku)
@@ -33,6 +44,11 @@ check_eq "SAR_LEAD2_MODEL" "$(json_get '["lead_phase2"]["model"]' <<<"$out")" cl
 check_eq "SAR_LEAD2_EFFORT" "$(json_get '["lead_phase2"]["effort"]' <<<"$out")" medium
 check_eq "SAR_LEAD_EFFORT leaves phase 2 alone" "$(json_get '["lead_phase2"]["effort"]' <<<"$(run SAR_LEAD_EFFORT=max)")" high
 check_eq "SAR_WORKER_MODEL sets the dispatch alias" "$(json_get '["worker"]["dispatch_model"]' <<<"$out")" haiku
+out=$(run SAR_WORKER_LIGHT_MODEL=sonnet SAR_WORKER_LIGHT_EFFORT=low SAR_SCOUT_MODEL=sonnet SAR_SCOUT_EFFORT=medium)
+check_eq "SAR_WORKER_LIGHT_MODEL sets the dispatch alias" "$(json_get '["worker_light"]["dispatch_model"]' <<<"$out")" sonnet
+check_eq "SAR_WORKER_LIGHT_EFFORT" "$(json_get '["worker_light"]["effort"]' <<<"$out")" low
+check_eq "SAR_SCOUT_MODEL sets the dispatch alias" "$(json_get '["scout"]["dispatch_model"]' <<<"$out")" sonnet
+check_eq "SAR_SCOUT_EFFORT" "$(json_get '["scout"]["effort"]' <<<"$out")" medium
 check_eq "session split defaults to auto" "$(json_get '["session_split"]' <<<"$out")" auto
 check_eq "SAR_SESSION_SPLIT" "$(json_get '["session_split"]' <<<"$(run SAR_SESSION_SPLIT=never)")" never
 run SAR_SESSION_SPLIT=bogus >/dev/null 2>&1; rc=$?

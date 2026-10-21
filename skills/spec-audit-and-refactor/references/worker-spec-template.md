@@ -116,6 +116,7 @@ Any other change to a DoD needs the user's approval.
 
 ## Lead checklist before dispatching
 - [ ] Slug is kebab-case and matches the worktree branch.
+- [ ] Worker tier (`light` / `standard`) meets [models.md](models.md#worker-tier).
 - [ ] Whitelist is the minimum set; tests are included.
 - [ ] Every DoD item is a runnable command or an objectively checkable statement, and
       follows the Repo rules (working directory, flags, allowed tools).

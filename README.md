@@ -214,14 +214,25 @@ Commits, pushes, PRs and worktree removal are always confirmed with you first.
 
 ### Default model assignment
 
-| Ecosystem | Lead · phase 1 (audit, spec, critic) | Lead · phase 2 (dispatch, gate, review) | Worker |
-| :--- | :--- | :--- | :--- |
-| Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium |
-| Gemini (Antigravity) | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high |
-| Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium |
+| Ecosystem | Lead · phase 1 (audit, spec) | Lead · phase 2 (dispatch, gate, review) | Worker | Light Worker | Scout |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Claude (Claude Code) | `claude-opus-5-5` · high | `claude-sonnet-5-5` · high | `claude-sonnet-5-5` · medium | `claude-haiku-5-5` · medium | `claude-haiku-5-5` · low |
+| Gemini (Antigravity) | `gemini-4-argon-high` · high | `gemini-3.8-flash-high` · high | `gemini-3.8-flash-high` · high | same as Worker | same as Worker |
+| Codex | `model` from `~/.codex/config.toml` · high | same as phase 1 | same model · medium | same model · low | same model · low |
+
+Cheaper models go only where the work is simple and checked afterwards:
+- **Light Worker** — a task gets it only when it is L-risk, mechanical (rename, dead code,
+  lint/type fixes), touches at most 5 files, and has a DoD that can tell fixed from unfixed.
+  The tier shows in the checkpoint's decision matrix, and a light task that fails its first
+  review is re-dispatched on the Worker model.
+- **Scout** — for a large audit scope, read-only scouts sweep it in parallel and return
+  `file:line` leads; the phase 1 Lead verifies each lead and does all the judging.
+- **Plan Critic** — runs on the phase 1 Lead model only when a task is H-risk, otherwise on
+  the phase 2 Lead model.
 
 Override with `SAR_LEAD_MODEL`, `SAR_LEAD_EFFORT`, `SAR_LEAD2_MODEL`, `SAR_LEAD2_EFFORT`,
-`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`.
+`SAR_WORKER_MODEL`, `SAR_WORKER_EFFORT`, `SAR_WORKER_LIGHT_MODEL`, `SAR_WORKER_LIGHT_EFFORT`,
+`SAR_SCOUT_MODEL`, `SAR_SCOUT_EFFORT`. Details: [models.md](skills/spec-audit-and-refactor/references/models.md).
 
 ## Configuration
 
@@ -299,8 +310,11 @@ tests/auth/          # trailing / means the whole directory
 │       │   ├── bare-layout.md           # Bare-repo layout and the migration prompt
 │       │   ├── dispatch.md              # How to dispatch Workers per runtime
 │       │   ├── execution-plan.md        # Dependency analysis, modes, checkpoint report, run state
+│       │   ├── models.md                # Models per role, Worker tiers and escalation
 │       │   ├── plan-critic.md           # Read-only adversarial review of the specs
 │       │   ├── review-checklist.md      # Diff review and verdict format
+│       │   ├── scout.md                 # Read-only audit sweeps on a cheap model
+│       │   ├── scripts-and-layout.md    # Script exit codes, worktree layout, config overrides
 │       │   └── worker-spec-template.md  # Spec handed to each Worker
 │       └── scripts/             # Bash helpers (see above)
 ├── tests/                       # Script tests in throwaway repos (not installed)

@@ -48,7 +48,8 @@ Findings (blocking first):
 - REQUEST_CHANGES → send the Worker the numbered blocking findings plus the original spec
   (same worktree, same whitelist), and store the findings as the task's `open_findings` in
   `state.json`. Max **3 rounds**; after that, stop and escalate to the user
-  with the remaining findings.
+  with the remaining findings. A `light` task's first REQUEST_CHANGES escalates it to the
+  `worker` model instead ([models.md](models.md#worker-tier)).
 - A finding that requires a file outside the whitelist is a spec change: ask the user before
   widening the whitelist. With parallel tasks, also check the new file is not in another
   task's whitelist for the same stage.
