@@ -143,6 +143,9 @@ npx skills add cosmo-chang-1701/spec-audit-and-refactor
 # All projects: installs to ~/.agents/skills/spec-audit-and-refactor and links ~/.claude/skills/
 npx skills add cosmo-chang-1701/spec-audit-and-refactor -g
 
+# All projects, named agents only (no PromptScript warning)
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -g -a claude-code
+
 # Pick agents explicitly
 npx skills add cosmo-chang-1701/spec-audit-and-refactor -a claude-code -a codex
 
@@ -156,6 +159,18 @@ npx skills remove spec-audit-and-refactor
 
 Only the `skills/spec-audit-and-refactor/` directory is installed; the README, LICENSE and
 `tests/` stay in the repository.
+
+> **Note**: a global install (`-g`) may print
+> `✗ spec-audit-and-refactor → PromptScript: PromptScript does not support global skill installation`.
+> It is harmless and can be ignored. When `-g` is used without `-a` and the CLI detects
+> only one installed agent (or `-y` is passed), it also targets every "universal" agent
+> that reads `.agents/skills`. PromptScript is one of them but supports project-level
+> installs only, so its install fails. This is `skills` CLI behaviour, not a problem with
+> this skill: the skill is still installed to `~/.agents/skills/spec-audit-and-refactor`
+> and linked into `~/.claude/skills/`. To avoid the line, name the agent(s) explicitly,
+> e.g. `-g -a claude-code`. With only `-a claude-code`, the CLI copies the skill straight
+> into `~/.claude/skills/spec-audit-and-refactor` instead of installing it under
+> `~/.agents/skills/` (add more `-a` flags for other agents).
 
 ### Manual / development install
 

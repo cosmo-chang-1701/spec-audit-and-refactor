@@ -132,6 +132,9 @@ npx skills add cosmo-chang-1701/spec-audit-and-refactor
 # 所有專案：安裝到 ~/.agents/skills/spec-audit-and-refactor，並連結 ~/.claude/skills/
 npx skills add cosmo-chang-1701/spec-audit-and-refactor -g
 
+# 所有專案，只針對指定的 agent（不會出現 PromptScript 警告）
+npx skills add cosmo-chang-1701/spec-audit-and-refactor -g -a claude-code
+
 # 明確指定 agent
 npx skills add cosmo-chang-1701/spec-audit-and-refactor -a claude-code -a codex
 
@@ -145,6 +148,16 @@ npx skills remove spec-audit-and-refactor
 
 只有 `skills/spec-audit-and-refactor/` 目錄會被安裝；README、LICENSE 與 `tests/` 只留在
 repository 中。
+
+> **注意**：全域安裝（`-g`）可能會印出
+> `✗ spec-audit-and-refactor → PromptScript: PromptScript does not support global skill installation`。
+> 這無害，可以忽略。當使用 `-g` 但未指定 `-a`，且 CLI 只偵測到一個已安裝的 agent（或有加
+> `-y`）時，CLI 也會把每個讀取 `.agents/skills` 的「universal」agent 列為目標。
+> PromptScript 就是其中之一，但它只支援專案層級安裝，所以安裝失敗。這是 `skills` CLI 的行為，
+> 並非此 skill 的問題：skill 仍會安裝到 `~/.agents/skills/spec-audit-and-refactor`，並連結到
+> `~/.claude/skills/`。若想避免這行訊息，請明確指定 agent，例如 `-g -a claude-code`。
+> 只指定 `-a claude-code` 時，CLI 會把 skill 直接複製到 `~/.claude/skills/spec-audit-and-refactor`，
+> 而不是安裝在 `~/.agents/skills/` 底下（要支援其他 agent 可再加 `-a`）。
 
 ### 手動 / 開發安裝
 
